@@ -1,0 +1,44 @@
+[package]
+name = "barefoc"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/bareFOC/bareFOC"
+rust-version = "1.75"
+description = "Pure-Rust, no_std port of the Arduino SimpleFOC (Field Oriented Control) library for embedded-hal v1.0 targets."
+
+[dependencies]
+libm = "0.2"
+embedded-hal = "1.0"
+embedded-io = "0.6"
+nb = "1.0"
+defmt = { version = "0.3", optional = true }
+rtic = { version = "2.1", optional = true }
+
+[dev-dependencies]
+embedded-hal-mock = "0.10"
+
+[features]
+# Default: enable `std` so the crate builds on the host (cargo test) without
+# pulling in any hardware-specific backends. Embedded targets should disable
+# the default features and opt in to only the platform / sensor / driver
+# features they need.
+default = ["std", "kinematics", "boot"]
+defmt = ["dep:defmt"]
+rtic = ["dep:rtic"]
+# Exposes `traits::BootTargetProvider` and the `BootTargetProvider` re-export.
+boot = []
+std = []
+kinematics = []
+stm32f4 = []
+stm32g4 = []
+esp32 = []
+inline-current-sense = []
+# Enables the blocking `pulseIn` path in `MagneticSensorPWM`. Off by
+# default — the default configuration is interrupt-only, which is
+# what most production users want. Opt in when you need the
+# blocking measurement (e.g. on a one-shot startup probe).
+magnetic-pwm-blocking = []
+
+[lints.rust]
+unsafe_code = "allow"

@@ -14,6 +14,8 @@ pub struct LutTransmission<const N: usize> {
     pub mot_max: f32,
     /// Joint output angles at uniform grid points from `mot_min` to `mot_max`.
     pub table: [f32; N],
+    /// Current point index pointer for streaming writes (0..N).
+    pub point_index: u16,
 }
 
 impl<const N: usize> LutTransmission<N> {
@@ -25,7 +27,14 @@ impl<const N: usize> LutTransmission<N> {
             mot_min,
             mot_max,
             table,
+            point_index: 0,
         }
+    }
+
+    /// Set initial point index.
+    pub fn with_point_index(mut self, point_index: u16) -> Self {
+        self.point_index = point_index;
+        self
     }
 
     /// Step size between adjacent grid points in motor radians.

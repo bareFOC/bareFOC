@@ -13,6 +13,135 @@ pub use differential::CoupledDifferential;
 pub use linear::LinearGear;
 pub use lut::LutTransmission;
 
+/// Dynamic runtime transmission container.
+///
+/// Wraps all supported transmission kinematics models in a stack-allocated enum,
+/// allowing runtime reconfiguration without dynamic dispatch or heap allocation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DynamicTransmission<const LUT_N: usize> {
+    /// Linear gear reduction with backlash and compliance.
+    Linear(LinearGear),
+    /// Coupled 2-DOF differential transmission (wrist / gimbal).
+    Differential(CoupledDifferential),
+    /// Non-linear uniform Look-Up Table transmission.
+    Lut(LutTransmission<LUT_N>),
+    /// Planar four-bar linkage (Freudenstein analytical solution).
+    FourBar(FourBarLinkage),
+    /// Eccentric cam transmission.
+    Cam(EccentricCam),
+}
+
+impl<const LUT_N: usize> From<LinearGear> for DynamicTransmission<LUT_N> {
+    #[inline]
+    fn from(gear: LinearGear) -> Self {
+        Self::Linear(gear)
+    }
+}
+
+impl<const LUT_N: usize> From<CoupledDifferential> for DynamicTransmission<LUT_N> {
+    #[inline]
+    fn from(diff: CoupledDifferential) -> Self {
+        Self::Differential(diff)
+    }
+}
+
+impl<const LUT_N: usize> From<LutTransmission<LUT_N>> for DynamicTransmission<LUT_N> {
+    #[inline]
+    fn from(lut: LutTransmission<LUT_N>) -> Self {
+        Self::Lut(lut)
+    }
+}
+
+impl<const LUT_N: usize> From<FourBarLinkage> for DynamicTransmission<LUT_N> {
+    #[inline]
+    fn from(fb: FourBarLinkage) -> Self {
+        Self::FourBar(fb)
+    }
+}
+
+impl<const LUT_N: usize> From<EccentricCam> for DynamicTransmission<LUT_N> {
+    #[inline]
+    fn from(cam: EccentricCam) -> Self {
+        Self::Cam(cam)
+    }
+}
+
+impl<const LUT_N: usize> Transmission<2, 2> for DynamicTransmission<LUT_N> {
+    fn forward(&self, mot_angles: &[f32; 2]) -> [f32; 2] {
+        match self {
+            Self::Linear(lg) => [lg.forward_1d(mot_angles[0]), mot_angles[1]],
+            Self::Differential(diff) => diff.forward(mot_angles),
+            Self::Lut(lut) => [lut.forward_1d(mot_angles[0]), mot_angles[1]],
+            Self::FourBar(fb) => [fb.forward_1d(mot_angles[0]), mot_angles[1]],
+            Self::Cam(cam) => [cam.forward_1d(mot_angles[0]), mot_angles[1]],
+        }
+    }
+
+    fn inverse(&self, joint_angles: &[f32; 2]) -> [f32; 2] {
+        match self {
+            Self::Linear(lg) => [lg.inverse_1d(joint_angles[0]), joint_angles[1]],
+            Self::Differential(diff) => diff.inverse(joint_angles),
+            Self::Lut(lut) => [lut.inverse_1d(joint_angles[0]), joint_angles[1]],
+            Self::FourBar(fb) => [fb.inverse_1d(joint_angles[0]), joint_angles[1]],
+            Self::Cam(cam) => [cam.inverse_1d(joint_angles[0]), joint_angles[1]],
+        }
+    }
+
+    fn jacobian(&self, mot_angles: &[f32; 2]) -> [[f32; 2]; 2] {
+        match self {
+            Self::Linear(lg) => [
+                [lg.jacobian_1d(), 0.0],
+                [0.0, 1.0],
+            ],
+            Self::Differential(diff) => diff.jacobian(mot_angles),
+            Self::Lut(lut) => [
+                [lut.jacobian_1d(mot_angles[0]), 0.0],
+                [0.0, 1.0],
+            ],
+            Self::FourBar(fb) => [
+                [fb.jacobian_1d(mot_angles[0]), 0.0],
+                [0.0, 1.0],
+            ],
+            Self::Cam(cam) => [
+                [cam.jacobian_1d(mot_angles[0]), 0.0],
+                [0.0, 1.0],
+            ],
+        }
+    }
+}
+
+impl<const LUT_N: usize> Transmission<1, 1> for DynamicTransmission<LUT_N> {
+    fn forward(&self, mot_angles: &[f32; 1]) -> [f32; 1] {
+        match self {
+            Self::Linear(lg) => [lg.forward_1d(mot_angles[0])],
+            Self::Differential(diff) => [diff.forward_2d([mot_angles[0], 0.0])[0]],
+            Self::Lut(lut) => [lut.forward_1d(mot_angles[0])],
+            Self::FourBar(fb) => [fb.forward_1d(mot_angles[0])],
+            Self::Cam(cam) => [cam.forward_1d(mot_angles[0])],
+        }
+    }
+
+    fn inverse(&self, joint_angles: &[f32; 1]) -> [f32; 1] {
+        match self {
+            Self::Linear(lg) => [lg.inverse_1d(joint_angles[0])],
+            Self::Differential(diff) => [diff.inverse_2d([joint_angles[0], 0.0])[0]],
+            Self::Lut(lut) => [lut.inverse_1d(joint_angles[0])],
+            Self::FourBar(fb) => [fb.inverse_1d(joint_angles[0])],
+            Self::Cam(cam) => [cam.inverse_1d(joint_angles[0])],
+        }
+    }
+
+    fn jacobian(&self, mot_angles: &[f32; 1]) -> [[f32; 1]; 1] {
+        match self {
+            Self::Linear(lg) => [[lg.jacobian_1d()]],
+            Self::Differential(diff) => [[diff.jacobian_2d()[0][0]]],
+            Self::Lut(lut) => [[lut.jacobian_1d(mot_angles[0])]],
+            Self::FourBar(fb) => [[fb.jacobian_1d(mot_angles[0])]],
+            Self::Cam(cam) => [[cam.jacobian_1d(mot_angles[0])]],
+        }
+    }
+}
+
 /// Generic kinematic transmission mapping between `MOTORS` motor axes
 /// and `JOINTS` joint axes.
 pub trait Transmission<const MOTORS: usize, const JOINTS: usize> {

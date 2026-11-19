@@ -9,6 +9,7 @@ use crate::traits::sensor::Sensor;
 use crate::kinematics::actuator::motor::MotorControl;
 use crate::kinematics::calibration::storage::FlashCalibrationData;
 use crate::kinematics::transmission::lut::LutTransmission;
+use super::{CalibCommand, CalibState};
 
 /// Calibration errors.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,12 +73,147 @@ pub struct CalibrationResult<const N: usize> {
 /// Autonomous 1-call calibrator.
 pub struct AutonomousCalibrator {
     pub config: CalibrationConfig,
+    pub state: CalibState,
+    pub progress: u8,
+    pub aborted: bool,
 }
 
 impl AutonomousCalibrator {
     /// Create a new autonomous calibrator with configuration.
     pub fn new(config: CalibrationConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            state: CalibState::Idle,
+            progress: 0,
+            aborted: false,
+        }
+    }
+
+    /// Process a calibration command trigger.
+    pub fn handle_command(&mut self, cmd: CalibCommand) -> Result<CalibState, CalibrationError> {
+        match cmd {
+            CalibCommand::StartAutonomous => {
+                self.aborted = false;
+                self.state = CalibState::Running;
+                self.progress = 0;
+                Ok(self.state)
+            }
+            CalibCommand::Abort => {
+                self.abort();
+                Ok(self.state)
+            }
+            CalibCommand::Reset => {
+                self.reset();
+                Ok(self.state)
+            }
+            CalibCommand::None => Ok(self.state),
+            _ => Err(CalibrationError::InvalidState),
+        }
+    }
+
+    /// Abort active calibration routine.
+    pub fn abort(&mut self) {
+        self.aborted = true;
+        self.state = CalibState::Idle;
+        self.progress = 0;
+    }
+
+    /// Reset calibrator state to Idle.
+    pub fn reset(&mut self) {
+        self.aborted = false;
+        self.state = CalibState::Idle;
+        self.progress = 0;
+    }
+
+    /// Returns true if abort was requested.
+    pub fn is_aborted(&self) -> bool {
+        self.aborted
+    }
+
+    /// Autonomous limit discovery lifecycle routine.
+    /// Finds negative limit, positive limit, and verifies limits.
+    pub fn discover_limits<M, C>(
+        &mut self,
+        motor: &mut M,
+        clock: &C,
+    ) -> Result<(f32, f32), CalibrationError>
+    where
+        M: MotorControl<C>,
+        C: Clock,
+    {
+        if self.aborted {
+            return Err(CalibrationError::InvalidState);
+        }
+        self.state = CalibState::Running;
+        self.progress = 10;
+
+        let mot_min = match self.find_endstop(motor, clock, -self.config.sweep_velocity) {
+            Ok(min) => min,
+            Err(e) => {
+                self.state = CalibState::Error;
+                return Err(e);
+            }
+        };
+
+        if self.aborted {
+            self.state = CalibState::Idle;
+            return Err(CalibrationError::InvalidState);
+        }
+        self.progress = 50;
+
+        let mot_max = match self.find_endstop(motor, clock, self.config.sweep_velocity) {
+            Ok(max) => max,
+            Err(e) => {
+                self.state = CalibState::Error;
+                return Err(e);
+            }
+        };
+
+        if self.aborted {
+            self.state = CalibState::Idle;
+            return Err(CalibrationError::InvalidState);
+        }
+
+        if mot_max <= mot_min {
+            self.state = CalibState::Error;
+            return Err(CalibrationError::InvalidLimits);
+        }
+
+        self.progress = 100;
+        self.state = CalibState::Done;
+        Ok((mot_min, mot_max))
+    }
+
+    /// Autonomous limit homing lifecycle routine.
+    /// Drives actuator in direction (+1.0 or -1.0) until stall endstop is confirmed.
+    pub fn home_to_limit<M, C>(
+        &mut self,
+        motor: &mut M,
+        clock: &C,
+        direction: f32,
+    ) -> Result<f32, CalibrationError>
+    where
+        M: MotorControl<C>,
+        C: Clock,
+    {
+        if self.aborted {
+            return Err(CalibrationError::InvalidState);
+        }
+        self.state = CalibState::Running;
+        let vel = if direction < 0.0 {
+            -self.config.sweep_velocity.abs()
+        } else {
+            self.config.sweep_velocity.abs()
+        };
+        let limit = match self.find_endstop(motor, clock, vel) {
+            Ok(l) => l,
+            Err(e) => {
+                self.state = CalibState::Error;
+                return Err(e);
+            }
+        };
+        self.state = CalibState::Done;
+        Ok(limit)
     }
 
     /// Fit a monotonic LUT transmission and pack flash configuration directly
@@ -188,7 +324,7 @@ impl AutonomousCalibrator {
 
     /// Full end-to-end 1-call autonomous calibration routine on live motor and sensor.
     pub fn auto_calibrate<const N: usize, M, C, SOut>(
-        &self,
+        &mut self,
         motor: &mut M,
         sensor: &mut SOut,
         clock: &C,
@@ -198,13 +334,44 @@ impl AutonomousCalibrator {
         C: Clock,
         SOut: Sensor<C>,
     {
+        if self.aborted {
+            return Err(CalibrationError::InvalidState);
+        }
+        self.state = CalibState::Running;
+        self.progress = 5;
+
         // 1. Discover negative endstop (mot_min)
-        let mot_min = self.find_endstop(motor, clock, -self.config.sweep_velocity)?;
+        let mot_min = match self.find_endstop(motor, clock, -self.config.sweep_velocity) {
+            Ok(min) => min,
+            Err(e) => {
+                self.state = CalibState::Error;
+                return Err(e);
+            }
+        };
+
+        if self.aborted {
+            self.state = CalibState::Idle;
+            return Err(CalibrationError::InvalidState);
+        }
+        self.progress = 35;
 
         // 2. Discover positive endstop (mot_max)
-        let mot_max = self.find_endstop(motor, clock, self.config.sweep_velocity)?;
+        let mot_max = match self.find_endstop(motor, clock, self.config.sweep_velocity) {
+            Ok(max) => max,
+            Err(e) => {
+                self.state = CalibState::Error;
+                return Err(e);
+            }
+        };
+
+        if self.aborted {
+            self.state = CalibState::Idle;
+            return Err(CalibrationError::InvalidState);
+        }
+        self.progress = 65;
 
         if mot_max <= mot_min {
+            self.state = CalibState::Error;
             return Err(CalibrationError::InvalidLimits);
         }
 
@@ -213,15 +380,21 @@ impl AutonomousCalibrator {
         let mut table = [0.0f32; N];
 
         for (i, slot) in table.iter_mut().enumerate() {
+            if self.aborted {
+                self.state = CalibState::Idle;
+                return Err(CalibrationError::InvalidState);
+            }
             let target_mot = mot_min + (i as f32) * delta;
             motor.move_motor(target_mot, clock);
             motor.loop_foc(clock);
             sensor.update(clock);
             *slot = sensor.get_angle();
+            self.progress = (65 + (i * 30 / N) as u8).min(95);
         }
 
         let lut = LutTransmission::new(mot_min, mot_max, table);
         if !lut.validate_monotonicity() {
+            self.state = CalibState::Error;
             return Err(CalibrationError::NonMonotonic);
         }
 
@@ -237,6 +410,9 @@ impl AutonomousCalibrator {
             ..Default::default()
         };
         flash_cfg.update_checksum();
+
+        self.progress = 100;
+        self.state = CalibState::Done;
 
         Ok(CalibrationResult {
             lut,

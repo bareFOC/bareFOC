@@ -33,6 +33,8 @@ pub struct Actuator2DOF<M1, M2, T, S2D, C: Clock> {
     pub current_joint_angles: [f32; 2],
     /// Last commanded motor velocities $[v_{m1}, v_{m2}]$ in rad/s.
     pub last_cmd_velocities: [f32; 2],
+    /// Selected motor index for motor register window (0 = motor1, 1 = motor2).
+    pub motor_selected: u8,
 }
 
 impl<M1, M2, T, S2D, C: Clock> Actuator2DOF<M1, M2, T, S2D, C> {
@@ -57,6 +59,7 @@ impl<M1, M2, T, S2D, C: Clock> Actuator2DOF<M1, M2, T, S2D, C> {
             target_joint_angles: [0.0, 0.0],
             current_joint_angles: [0.0, 0.0],
             last_cmd_velocities: [0.0, 0.0],
+            motor_selected: 0,
         }
     }
 

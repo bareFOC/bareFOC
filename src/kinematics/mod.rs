@@ -24,13 +24,14 @@ pub mod transmission;
 
 pub use actuator::{Actuator1DOF, Actuator2DOF, MotorControl};
 pub use calibration::{
-    AutonomousCalibrator, CalibrationConfig, CalibrationError, CalibrationResult,
-    FlashCalibrationData, InteractiveCalibrator, InteractiveState, StorageError,
+    load_from_flash, save_to_flash, AutonomousCalibrator, CalibCommand, CalibState,
+    CalibrationConfig, CalibrationError, CalibrationResult, FlashCalibrationData,
+    InteractiveCalibrator, InteractiveState, StorageError,
 };
 pub use sensor::{AxisView, DualSensorAdapter, MockSensor2D, Sensor2D};
 pub use transmission::{
-    AnalyticalLinkage, CoupledDifferential, EccentricCam, FourBarBranch, FourBarLinkage,
-    LinearGear, LutTransmission, Transmission,
+    AnalyticalLinkage, CoupledDifferential, DynamicTransmission, EccentricCam, FourBarBranch,
+    FourBarLinkage, LinearGear, LutTransmission, Transmission,
 };
 
 #[cfg(test)]
@@ -522,5 +523,214 @@ mod tests {
 
         let result = calib.get_result().expect("result available");
         assert!(result.lut.validate_monotonicity());
+    }
+
+    #[test]
+    fn test_dynamic_transmission_all_variants_and_switching() {
+        // 1. Linear variant
+        let linear = LinearGear::new(10.0);
+        let mut dyn_tx = DynamicTransmission::<4>::from(linear);
+        let mot = [20.0, 5.0];
+        let joint = dyn_tx.forward(&mot);
+        assert!((joint[0] - 2.0).abs() < 1e-5);
+        assert!((joint[1] - 5.0).abs() < 1e-5);
+        let inv = dyn_tx.inverse(&joint);
+        assert!((inv[0] - 20.0).abs() < 1e-5);
+        assert!((inv[1] - 5.0).abs() < 1e-5);
+        let jac = dyn_tx.jacobian(&mot);
+        assert!((jac[0][0] - 0.1).abs() < 1e-5);
+        assert_eq!(jac[0][1], 0.0);
+        assert_eq!(jac[1][0], 0.0);
+        assert_eq!(jac[1][1], 1.0);
+
+        // 1-DOF Transmission trait
+        let j1: [f32; 1] = <DynamicTransmission<4> as Transmission<1, 1>>::forward(&dyn_tx, &[20.0]);
+        assert!((j1[0] - 2.0).abs() < 1e-5);
+
+        // 2. Switch to Differential
+        let diff = CoupledDifferential::symmetric(2.0);
+        dyn_tx = DynamicTransmission::Differential(diff);
+        let diff_mot = [4.0, 2.0];
+        let diff_joint = dyn_tx.forward(&diff_mot);
+        assert!((diff_joint[0] - 1.5).abs() < 1e-5);
+        assert!((diff_joint[1] - 0.5).abs() < 1e-5);
+        let diff_inv = dyn_tx.inverse(&diff_joint);
+        assert!((diff_inv[0] - 4.0).abs() < 1e-5);
+        assert!((diff_inv[1] - 2.0).abs() < 1e-5);
+
+        // 3. Switch to LUT
+        let lut = LutTransmission::new(0.0, 3.0, [0.0, 1.0, 2.0, 3.0]);
+        dyn_tx = DynamicTransmission::Lut(lut);
+        let lut_joint = dyn_tx.forward(&[1.5, 3.0]);
+        assert!((lut_joint[0] - 1.5).abs() < 1e-5);
+        assert!((lut_joint[1] - 3.0).abs() < 1e-5);
+        let lut_inv = dyn_tx.inverse(&lut_joint);
+        assert!((lut_inv[0] - 1.5).abs() < 1e-5);
+
+        // 4. Switch to FourBarLinkage
+        let fb = FourBarLinkage::new(100.0, 30.0, 90.0, 40.0, FourBarBranch::Open);
+        dyn_tx = DynamicTransmission::FourBar(fb);
+        let fb_joint = dyn_tx.forward(&[0.5, 1.2]);
+        let expected_fb = fb.forward_1d(0.5);
+        assert!((fb_joint[0] - expected_fb).abs() < 1e-5);
+        assert!((fb_joint[1] - 1.2).abs() < 1e-5);
+        let fb_inv = dyn_tx.inverse(&fb_joint);
+        assert!((fb_inv[0] - 0.5).abs() < 1e-3);
+
+        // 5. Switch to Cam
+        let cam = EccentricCam::new(20.0, 5.0);
+        dyn_tx = DynamicTransmission::Cam(cam);
+        let cam_joint = dyn_tx.forward(&[0.0, 4.0]);
+        let expected_cam = cam.forward_1d(0.0);
+        assert!((cam_joint[0] - expected_cam).abs() < 1e-5);
+        assert!((cam_joint[1] - 4.0).abs() < 1e-5);
+        let cam_jac = dyn_tx.jacobian(&[0.0, 4.0]);
+        assert!((cam_jac[0][0] - cam.jacobian_1d(0.0)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_flash_storage_block_serialization_and_crc32() {
+        let mut data = FlashCalibrationData {
+            gear_ratio: 15.5,
+            zero_offset: 0.456,
+            backlash_delta: 0.02,
+            torsional_stiffness: 120.0,
+            joint_min: -2.0,
+            joint_max: 2.0,
+            lut_mot_min: 0.0,
+            lut_mot_max: 4.0,
+            lut_points: 32,
+            ..Default::default()
+        };
+        data.update_checksum();
+
+        // serialize_to_block & deserialize_from_block
+        let block = data.serialize_to_block();
+        assert_eq!(block.len(), 64);
+
+        let restored = FlashCalibrationData::deserialize_from_block(&block).expect("deserialization ok");
+        assert_eq!(restored.gear_ratio, 15.5);
+        assert_eq!(restored.zero_offset, 0.456);
+        assert_eq!(restored.backlash_delta, 0.02);
+        assert_eq!(restored.torsional_stiffness, 120.0);
+        assert_eq!(restored.joint_min, -2.0);
+        assert_eq!(restored.joint_max, 2.0);
+        assert_eq!(restored.lut_points, 32);
+
+        // save_to_flash & load_from_flash helper functions
+        let saved_block = save_to_flash(&data);
+        let loaded = load_from_flash(&saved_block).expect("load_from_flash ok");
+        assert_eq!(loaded, restored);
+
+        // CRC32 mismatch detection
+        let mut corrupted_crc = block;
+        corrupted_crc[15] ^= 0x55;
+        assert_eq!(
+            load_from_flash(&corrupted_crc).unwrap_err(),
+            StorageError::ChecksumMismatch
+        );
+
+        // Magic mismatch detection
+        let mut corrupted_magic = block;
+        corrupted_magic[0] ^= 0x01;
+        assert_eq!(
+            load_from_flash(&corrupted_magic).unwrap_err(),
+            StorageError::InvalidMagic
+        );
+
+        // Buffer too small detection
+        let short_buffer = [0u8; 40];
+        assert_eq!(
+            load_from_flash(&short_buffer).unwrap_err(),
+            StorageError::BufferTooSmall
+        );
+    }
+
+    #[test]
+    fn test_calibration_command_dispatch_and_lifecycles() {
+        // AutonomousCalibrator lifecycle commands
+        let mut auto_calib = AutonomousCalibrator::new(CalibrationConfig::default());
+        assert_eq!(auto_calib.state, CalibState::Idle);
+        assert_eq!(auto_calib.progress, 0);
+        assert!(!auto_calib.is_aborted());
+
+        // StartAutonomous
+        assert_eq!(
+            auto_calib.handle_command(CalibCommand::StartAutonomous).unwrap(),
+            CalibState::Running
+        );
+        assert_eq!(auto_calib.state, CalibState::Running);
+
+        // Abort
+        assert_eq!(
+            auto_calib.handle_command(CalibCommand::Abort).unwrap(),
+            CalibState::Idle
+        );
+        assert!(auto_calib.is_aborted());
+
+        // Reset
+        assert_eq!(
+            auto_calib.handle_command(CalibCommand::Reset).unwrap(),
+            CalibState::Idle
+        );
+        assert!(!auto_calib.is_aborted());
+
+        // InteractiveCalibrator bus command dispatch
+        let mut inter_calib: InteractiveCalibrator<4> = InteractiveCalibrator::new();
+        assert_eq!(inter_calib.state, InteractiveState::Idle);
+
+        // StartInteractive command
+        let st = inter_calib
+            .handle_calib_command(CalibCommand::StartInteractive, 0.0, 0.0)
+            .unwrap();
+        assert_eq!(st, InteractiveState::SettingMin);
+
+        // SetMin command
+        let st = inter_calib
+            .handle_calib_command(CalibCommand::SetMin, -1.5, -0.8)
+            .unwrap();
+        assert_eq!(st, InteractiveState::SettingMax);
+        assert_eq!(inter_calib.mot_min, -1.5);
+        assert_eq!(inter_calib.joint_min, -0.8);
+
+        // SetMax command
+        let st = inter_calib
+            .handle_calib_command(CalibCommand::SetMax, 1.5, 0.8)
+            .unwrap();
+        assert_eq!(st, InteractiveState::ReadyToSweep);
+        assert_eq!(inter_calib.mot_max, 1.5);
+        assert_eq!(inter_calib.joint_max, 0.8);
+
+        // Sweep command
+        let st = inter_calib
+            .handle_calib_command(CalibCommand::Sweep, 0.0, 0.0)
+            .unwrap();
+        assert_eq!(st, InteractiveState::Sweeping);
+
+        // Feed samples
+        let _ = inter_calib.step_sample(-0.8).unwrap();
+        let _ = inter_calib.step_sample(-0.2).unwrap();
+        let _ = inter_calib.step_sample(0.3).unwrap();
+        let _ = inter_calib.step_sample(0.8).unwrap();
+        assert_eq!(inter_calib.state, InteractiveState::Completed);
+
+        // SaveFlash command
+        let st = inter_calib
+            .handle_calib_command(CalibCommand::SaveFlash, 0.0, 0.0)
+            .unwrap();
+        assert_eq!(st, InteractiveState::Completed);
+
+        // Interactive homing step
+        let home = inter_calib.step_homing(0.25);
+        assert_eq!(home, 0.25);
+
+        // Interactive backlash measurement step
+        let backlash = inter_calib.step_backlash(1.08, 0.92);
+        assert!((backlash - 0.08).abs() < 1e-5);
+
+        let cfg = inter_calib.flash_config.expect("flash config exists");
+        assert_eq!(cfg.zero_offset, 0.25);
+        assert!((cfg.backlash_delta - 0.08).abs() < 1e-5);
+        assert!(cfg.validate().is_ok());
     }
 }

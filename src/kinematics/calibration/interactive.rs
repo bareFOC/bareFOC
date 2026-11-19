@@ -6,6 +6,7 @@
 
 use super::autonomous::{CalibrationError, CalibrationResult};
 use super::storage::FlashCalibrationData;
+use super::CalibCommand;
 use crate::kinematics::transmission::lut::LutTransmission;
 
 /// Interactive calibration state machine phases.
@@ -225,5 +226,94 @@ impl<const N: usize> InteractiveCalibrator<N> {
         } else {
             None
         }
+    }
+
+    /// Process a bus calibration command trigger (`CalibCommand`).
+    pub fn handle_calib_command(
+        &mut self,
+        cmd: CalibCommand,
+        current_mot: f32,
+        current_joint: f32,
+    ) -> Result<InteractiveState, CalibrationError> {
+        match cmd {
+            CalibCommand::StartInteractive | CalibCommand::StartAutonomous => {
+                self.state = InteractiveState::SettingMin;
+                self.sweep_index = 0;
+                self.flash_config = None;
+                Ok(self.state)
+            }
+            CalibCommand::SetMin => {
+                if self.state != InteractiveState::SettingMin {
+                    return Err(CalibrationError::InvalidState);
+                }
+                self.mot_min = current_mot;
+                self.joint_min = current_joint;
+                self.state = InteractiveState::SettingMax;
+                Ok(self.state)
+            }
+            CalibCommand::SetMax => {
+                if self.state != InteractiveState::SettingMax {
+                    return Err(CalibrationError::InvalidState);
+                }
+                if current_mot <= self.mot_min {
+                    self.state = InteractiveState::Error(CalibrationError::InvalidLimits);
+                    return Err(CalibrationError::InvalidLimits);
+                }
+                self.mot_max = current_mot;
+                self.joint_max = current_joint;
+                self.state = InteractiveState::ReadyToSweep;
+                Ok(self.state)
+            }
+            CalibCommand::Sweep => {
+                match self.state {
+                    InteractiveState::ReadyToSweep => {
+                        self.state = InteractiveState::Sweeping;
+                        self.sweep_index = 0;
+                        Ok(self.state)
+                    }
+                    InteractiveState::Sweeping => {
+                        if self.sweep_index >= N {
+                            self.finalize_sweep()?;
+                        }
+                        Ok(self.state)
+                    }
+                    _ => Err(CalibrationError::InvalidState),
+                }
+            }
+            CalibCommand::SaveFlash => {
+                if self.state != InteractiveState::Completed {
+                    return Err(CalibrationError::InvalidState);
+                }
+                Ok(self.state)
+            }
+            CalibCommand::Reset | CalibCommand::Abort => {
+                self.state = InteractiveState::Idle;
+                self.sweep_index = 0;
+                self.flash_config = None;
+                Ok(self.state)
+            }
+            CalibCommand::None => Ok(self.state),
+        }
+    }
+
+    /// Interactive homing lifecycle step: sets zero offset / home angle in motor radians.
+    pub fn step_homing(&mut self, home_mot_angle: f32) -> f32 {
+        self.mot_min = home_mot_angle;
+        if let Some(ref mut cfg) = self.flash_config {
+            cfg.zero_offset = home_mot_angle;
+            cfg.update_checksum();
+        }
+        home_mot_angle
+    }
+
+    /// Interactive backlash measurement step: computes backlash half-deadband
+    /// $\delta = 0.5 \cdot |\theta_{\text{fwd}} - \theta_{\text{rev}}|$ and updates flash configuration.
+    pub fn step_backlash(&mut self, forward_joint: f32, reverse_joint: f32) -> f32 {
+        let delta = libm::fabsf(forward_joint - reverse_joint) * 0.5;
+        if let Some(ref mut cfg) = self.flash_config {
+            cfg.backlash_delta = delta;
+            cfg.update_checksum();
+        }
+        delta
     }
 }

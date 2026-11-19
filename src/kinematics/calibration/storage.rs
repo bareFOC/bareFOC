@@ -112,6 +112,16 @@ impl FlashCalibrationData {
         data.to_bytes_raw()
     }
 
+    /// Serialize structure into a fixed 64-byte block with updated CRC32 checksum.
+    pub fn serialize_to_block(&self) -> [u8; 64] {
+        self.to_bytes()
+    }
+
+    /// Save calibration configuration to a 64-byte flash block with valid CRC32.
+    pub fn save_to_flash(&self) -> [u8; 64] {
+        self.serialize_to_block()
+    }
+
     fn to_bytes_raw(self) -> [u8; 64] {
         let mut buf = [0u8; 64];
         buf[0..4].copy_from_slice(&self.magic.to_le_bytes());
@@ -173,6 +183,16 @@ impl FlashCalibrationData {
         Ok(data)
     }
 
+    /// Deserialize structure from a 64-byte block and validate integrity (magic, version, and CRC32 checksum).
+    pub fn deserialize_from_block(block: &[u8]) -> Result<Self, StorageError> {
+        Self::from_bytes(block)
+    }
+
+    /// Load and validate calibration configuration from a 64-byte flash block.
+    pub fn load_from_flash(bytes: &[u8]) -> Result<Self, StorageError> {
+        Self::from_bytes(bytes)
+    }
+
     /// Pack header along with an $N$-element LUT table into an output buffer.
     pub fn pack_with_lut<const N: usize>(
         &self,
@@ -212,6 +232,16 @@ impl FlashCalibrationData {
         }
         Ok((hdr, table))
     }
+}
+
+/// Serialize and pack a calibration configuration into a 64-byte flash block with valid CRC32.
+pub fn save_to_flash(data: &FlashCalibrationData) -> [u8; 64] {
+    data.save_to_flash()
+}
+
+/// Deserialize and validate a calibration configuration from a 64-byte flash block.
+pub fn load_from_flash(bytes: &[u8]) -> Result<FlashCalibrationData, StorageError> {
+    FlashCalibrationData::load_from_flash(bytes)
 }
 
 /// Standard IEEE 802.3 CRC32 calculation.

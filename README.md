@@ -73,6 +73,7 @@ BareFOC is organized into specialized repositories under the [BareFOC GitHub Org
 | **BLDC 3-PWM** | `BLDCDriver3PWM` | Integrated 3-phase bridges (DRV8313, L6234, discrete half-bridges) | 3 PWM channels + optional enable pins |
 | **BLDC 6-PWM** | `BLDCDriver6PWM` | Smart gate drivers (DRV8301, DRV8323, STSPIN32G4, discrete MOSFET bridges) | 6 complementary PWM channels with dead-time |
 | **Stepper 2-PWM / 4-PWM** | `StepperDriver2PWM`, `StepperDriver4PWM` | Dual H-bridge drivers (L298N, DRV8833, discrete H-bridges) | 2 or 4 PWM channels |
+| **DC H-Bridge (1-Phase / 2-PWM)** | `DCDriver2PWM` (`barefoc-drivers`) | Single-phase H-bridge drivers (TI DRV8411A, DRV887x, L298N, discrete H-bridges) | 2 PWM channels with shoot-through protection + optional enable |
 
 ### Current Sensing Architectures
 
@@ -80,6 +81,7 @@ BareFOC is organized into specialized repositories under the [BareFOC GitHub Org
 |---|---|---|---|
 | **Inline Shunts** | `InlineCurrentSense` | Phase-series shunts (INA240, ACS712) | Phase currents sampled independently of PWM state; 2-shunt or 3-shunt. |
 | **Low-Side Shunts** | `LowsideCurrentSense` | Ground-return shunts, internal CSAs (DRV8301, STSPIN32G4) | Sampling synchronized to low-side active conduction window; 2-shunt or 3-shunt. |
+| **Current Mirror Sense** | `CurrentMirrorSense` (`barefoc-drivers`) | Integrated driver current mirrors (TI DRV8411A, DRV887x, IPROPI) | Single-pin unipolar current mirror with direction sign reconstruction. |
 | **Generic Current** | `GenericCurrentSense` | Digital bus monitors or custom ADC routines | Custom closures for current acquisition. |
 
 ---
@@ -98,6 +100,7 @@ BareFOC is organized into specialized repositories under the [BareFOC GitHub Org
   - 3-Phase Brushless DC Motors (`BLDCMotor`).
   - 2-Phase Bipolar Stepper Motors (`StepperMotor`).
   - Hybrid 3-Phase Steppers (`HybridStepperMotor`).
+  - Brushed DC Motors (`DCMotor` via `barefoc-drivers` supporting voltage, velocity, and position closed loops).
 - **Robotics Kinematics** (`barefoc::kinematics`):
   - Cascaded joint and actuator transmission abstractions (`Transmission`, `LinearGear`, `LutTransmission`).
   - Kinematic calibration tools (`AutonomousCalibrator`, `InteractiveCalibrator`).

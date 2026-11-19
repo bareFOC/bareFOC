@@ -3,6 +3,8 @@
 //! Provides a 64-byte quadword-aligned configuration structure with CRC32 integrity
 //! checking for non-volatile flash memory storage.
 
+use crate::kinematics::assembly::TopologyConfig;
+
 /// Magic signature for BareFOC kinematics configuration block ("BFOC").
 pub const FLASH_MAGIC: u32 = 0x4246_4F43;
 
@@ -50,8 +52,10 @@ pub struct FlashCalibrationData {
     pub lut_mot_max: f32,
     /// Number of points in LUT table.
     pub lut_points: u16,
+    /// Multi-axis topology preset and sensor routing configuration.
+    pub topology: TopologyConfig,
     /// Reserved padding bytes for future expansion and alignment.
-    pub reserved: [u8; 18],
+    pub reserved: [u8; 12],
     /// CRC32 checksum over the preceding 60 bytes.
     pub checksum: u32,
 }
@@ -71,7 +75,8 @@ impl Default for FlashCalibrationData {
             lut_mot_min: 0.0,
             lut_mot_max: 0.0,
             lut_points: 0,
-            reserved: [0u8; 18],
+            topology: TopologyConfig::default(),
+            reserved: [0u8; 12],
             checksum: 0,
         };
         data.checksum = data.compute_checksum();
@@ -136,7 +141,8 @@ impl FlashCalibrationData {
         buf[32..36].copy_from_slice(&self.lut_mot_min.to_le_bytes());
         buf[36..40].copy_from_slice(&self.lut_mot_max.to_le_bytes());
         buf[40..42].copy_from_slice(&self.lut_points.to_le_bytes());
-        buf[42..60].copy_from_slice(&self.reserved);
+        buf[42..48].copy_from_slice(&self.topology.to_bytes());
+        buf[48..60].copy_from_slice(&self.reserved);
         buf[60..64].copy_from_slice(&self.checksum.to_le_bytes());
         buf
     }
@@ -158,8 +164,11 @@ impl FlashCalibrationData {
         let lut_mot_min = f32::from_le_bytes(bytes[32..36].try_into().unwrap());
         let lut_mot_max = f32::from_le_bytes(bytes[36..40].try_into().unwrap());
         let lut_points = u16::from_le_bytes(bytes[40..42].try_into().unwrap());
-        let mut reserved = [0u8; 18];
-        reserved.copy_from_slice(&bytes[42..60]);
+        let mut top_bytes = [0u8; 6];
+        top_bytes.copy_from_slice(&bytes[42..48]);
+        let topology = TopologyConfig::from_bytes(&top_bytes);
+        let mut reserved = [0u8; 12];
+        reserved.copy_from_slice(&bytes[48..60]);
         let checksum = u32::from_le_bytes(bytes[60..64].try_into().unwrap());
 
         let data = Self {
@@ -175,6 +184,7 @@ impl FlashCalibrationData {
             lut_mot_min,
             lut_mot_max,
             lut_points,
+            topology,
             reserved,
             checksum,
         };

@@ -18,11 +18,16 @@
 //!   [`FlashCalibrationData`] serialization.
 
 pub mod actuator;
+pub mod assembly;
 pub mod calibration;
 pub mod sensor;
 pub mod transmission;
 
 pub use actuator::{Actuator1DOF, Actuator2DOF, MotorControl};
+pub use assembly::{
+    ActuatorAssembly, CalibTelemetry, JointPidState, JointTelemetry, MotorAxisTelemetry,
+    TopologyConfig, TopologyPreset,
+};
 pub use calibration::{
     load_from_flash, save_to_flash, AutonomousCalibrator, CalibCommand, CalibState,
     CalibrationConfig, CalibrationError, CalibrationResult, FlashCalibrationData,
@@ -732,5 +737,301 @@ mod tests {
         assert_eq!(cfg.zero_offset, 0.25);
         assert!((cfg.backlash_delta - 0.08).abs() < 1e-5);
         assert!(cfg.validate().is_ok());
+    }
+
+    // -----------------------------------------------------------------------
+    // ActuatorAssembly & Topology Manager Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_topology_preset_and_config_serialization() {
+        assert_eq!(TopologyPreset::Four1Dof as u8, 0);
+        assert_eq!(TopologyPreset::Two2Dof as u8, 1);
+        assert_eq!(TopologyPreset::One1DofOne2Dof as u8, 2);
+        assert_eq!(TopologyPreset::Two1DofOne2Dof as u8, 3);
+        assert_eq!(TopologyPreset::Custom as u8, 0xFF);
+
+        assert_eq!(TopologyPreset::from_u8(0), TopologyPreset::Four1Dof);
+        assert_eq!(TopologyPreset::from_u8(1), TopologyPreset::Two2Dof);
+        assert_eq!(TopologyPreset::from_u8(2), TopologyPreset::One1DofOne2Dof);
+        assert_eq!(TopologyPreset::from_u8(3), TopologyPreset::Two1DofOne2Dof);
+        assert_eq!(TopologyPreset::from_u8(0xFF), TopologyPreset::Custom);
+        assert_eq!(TopologyPreset::from_u8(42), TopologyPreset::Custom);
+
+        let default_cfg = TopologyConfig::default();
+        assert_eq!(default_cfg.preset, TopologyPreset::Four1Dof);
+        assert_eq!(default_cfg.sensor_map, [0, 1, 2, 3]);
+        assert_eq!(default_cfg.coupling_mask, 0x00);
+
+        let custom_cfg = TopologyConfig {
+            preset: TopologyPreset::Two2Dof,
+            sensor_map: [3, 2, 1, 0],
+            coupling_mask: 0x03,
+        };
+        let bytes = custom_cfg.to_bytes();
+        assert_eq!(bytes.len(), 6);
+        assert_eq!(bytes[0], 1);
+        assert_eq!(bytes[1..5], [3, 2, 1, 0]);
+        assert_eq!(bytes[5], 0x03);
+
+        let restored = TopologyConfig::from_bytes(&bytes);
+        assert_eq!(restored, custom_cfg);
+    }
+
+    #[test]
+    fn test_flash_storage_with_topology_config() {
+        let mut data = FlashCalibrationData {
+            gear_ratio: 21.0,
+            zero_offset: 0.123,
+            topology: TopologyConfig {
+                preset: TopologyPreset::Two2Dof,
+                sensor_map: [2, 3, 0, 1],
+                coupling_mask: 0x03,
+            },
+            ..Default::default()
+        };
+        data.update_checksum();
+
+        assert_eq!(core::mem::size_of::<FlashCalibrationData>(), 64);
+        assert_eq!(core::mem::align_of::<FlashCalibrationData>(), 64);
+
+        let block = data.serialize_to_block();
+        let restored = FlashCalibrationData::deserialize_from_block(&block).expect("valid block");
+        assert_eq!(restored.topology.preset, TopologyPreset::Two2Dof);
+        assert_eq!(restored.topology.sensor_map, [2, 3, 0, 1]);
+        assert_eq!(restored.topology.coupling_mask, 0x03);
+    }
+
+    #[test]
+    fn test_actuator_assembly_four_1dof_topology() {
+        let clock = MockClock::new();
+        let mut assembly = ActuatorAssembly::<4, 4>::new().with_downsample(1);
+
+        let mut motors = [
+            MockMotor::new(),
+            MockMotor::new(),
+            MockMotor::new(),
+            MockMotor::new(),
+        ];
+        let mut sensors = [
+            SimpleMockSensor::new(0.0),
+            SimpleMockSensor::new(0.0),
+            SimpleMockSensor::new(0.0),
+            SimpleMockSensor::new(0.0),
+        ];
+
+        // Configure joint P gains
+        for j in assembly.joints.iter_mut() {
+            j.pid_p = 2.0;
+            j.gear_ratio = 1.0;
+        }
+
+        // Set targets
+        assembly.set_joint_target(0, 1.0);
+        assembly.set_joint_target(1, 2.0);
+        assembly.set_joint_target(2, -1.5);
+        assembly.set_joint_target(3, -0.5);
+
+        clock.advance(1000);
+        assembly.step_all(&mut motors, &mut sensors, &clock);
+
+        // Errors: [1.0, 2.0, -1.5, -0.5] * P(2.0) = [2.0, 4.0, -3.0, -1.0]
+        assert!((motors[0].velocity - 2.0).abs() < 1e-4);
+        assert!((motors[1].velocity - 4.0).abs() < 1e-4);
+        assert!((motors[2].velocity - (-3.0)).abs() < 1e-4);
+        assert!((motors[3].velocity - (-1.0)).abs() < 1e-4);
+
+        // FOC loop should have run on all 4 motors
+        for m in motors.iter() {
+            assert_eq!(m.loop_foc_count, 1);
+        }
+
+        // Joint angles report present sensor angles
+        assert_eq!(assembly.joint_angle(0), 0.0);
+        assert_eq!(assembly.joint_angle(1), 0.0);
+        assert_eq!(assembly.joint_angle(2), 0.0);
+        assert_eq!(assembly.joint_angle(3), 0.0);
+    }
+
+    #[test]
+    fn test_actuator_assembly_two_2dof_topology() {
+        let clock = MockClock::new();
+        let mut assembly = ActuatorAssembly::<4, 4>::new().with_downsample(1);
+        assembly.set_topology(TopologyPreset::Two2Dof);
+
+        let mut motors = [
+            MockMotor::new(),
+            MockMotor::new(),
+            MockMotor::new(),
+            MockMotor::new(),
+        ];
+        let mut sensors = [
+            SimpleMockSensor::new(0.0),
+            SimpleMockSensor::new(0.0),
+            SimpleMockSensor::new(0.0),
+            SimpleMockSensor::new(0.0),
+        ];
+
+        for j in assembly.joints.iter_mut() {
+            j.pid_p = 1.0;
+            j.gear_ratio = 1.0;
+        }
+
+        // Pair 0: joint 0 (alpha) = 2.0, joint 1 (beta) = 0.0
+        assembly.set_joint_target(0, 2.0);
+        assembly.set_joint_target(1, 0.0);
+
+        // Pair 1: joint 2 (pitch) = 0.0, joint 3 (roll) = 3.0
+        assembly.set_joint_target(2, 0.0);
+        assembly.set_joint_target(3, 3.0);
+
+        clock.advance(1000);
+        assembly.step_all(&mut motors, &mut sensors, &clock);
+
+        // Pair 0 decoupled: v_m0 = R*(v_a + v_b) = 1.0*(2.0 + 0.0) = 2.0
+        //                   v_m1 = R*(v_a - v_b) = 1.0*(2.0 - 0.0) = 2.0
+        assert!((motors[0].velocity - 2.0).abs() < 1e-4);
+        assert!((motors[1].velocity - 2.0).abs() < 1e-4);
+
+        // Pair 1 decoupled: v_m2 = R*(v_p + v_r) = 1.0*(0.0 + 3.0) = 3.0
+        //                   v_m3 = R*(v_p - v_r) = 1.0*(0.0 - 3.0) = -3.0
+        assert!((motors[2].velocity - 3.0).abs() < 1e-4);
+        assert!((motors[3].velocity - (-3.0)).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_actuator_assembly_one_1dof_one_2dof_topology() {
+        let clock = MockClock::new();
+        let mut assembly = ActuatorAssembly::<4, 4>::new().with_downsample(1);
+        assembly.set_topology(TopologyPreset::One1DofOne2Dof);
+
+        let mut motors = [
+            MockMotor::new(),
+            MockMotor::new(),
+            MockMotor::new(),
+            MockMotor::new(),
+        ];
+        let mut sensors = [
+            SimpleMockSensor::new(0.0),
+            SimpleMockSensor::new(0.0),
+            SimpleMockSensor::new(0.0),
+            SimpleMockSensor::new(0.0),
+        ];
+
+        for j in assembly.joints.iter_mut() {
+            j.pid_p = 1.0;
+            j.gear_ratio = 1.0;
+        }
+
+        // Joint 0 (1-DOF): target = 1.5
+        assembly.set_joint_target(0, 1.5);
+        // Joints 1 & 2 (2-DOF pair): targets = [1.0, 0.5]
+        assembly.set_joint_target(1, 1.0);
+        assembly.set_joint_target(2, 0.5);
+
+        clock.advance(1000);
+        assembly.step_all(&mut motors, &mut sensors, &clock);
+
+        // Motor 0: 1.5
+        assert!((motors[0].velocity - 1.5).abs() < 1e-4);
+        // Motors 1 & 2: v_m1 = 1.0 + 0.5 = 1.5, v_m2 = 1.0 - 0.5 = 0.5
+        assert!((motors[1].velocity - 1.5).abs() < 1e-4);
+        assert!((motors[2].velocity - 0.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_actuator_assembly_two_1dof_one_2dof_topology() {
+        let clock = MockClock::new();
+        let mut assembly = ActuatorAssembly::<4, 4>::new().with_downsample(1);
+        assembly.set_topology(TopologyPreset::Two1DofOne2Dof);
+
+        let mut motors = [
+            MockMotor::new(),
+            MockMotor::new(),
+            MockMotor::new(),
+            MockMotor::new(),
+        ];
+        let mut sensors = [
+            SimpleMockSensor::new(0.0),
+            SimpleMockSensor::new(0.0),
+            SimpleMockSensor::new(0.0),
+            SimpleMockSensor::new(0.0),
+        ];
+
+        for j in assembly.joints.iter_mut() {
+            j.pid_p = 1.0;
+            j.gear_ratio = 1.0;
+        }
+
+        // Joint 0 (1-DOF): 1.0
+        assembly.set_joint_target(0, 1.0);
+        // Joint 1 (1-DOF): 2.0
+        assembly.set_joint_target(1, 2.0);
+        // Joints 2 & 3 (2-DOF pair): targets = [2.0, 1.0]
+        assembly.set_joint_target(2, 2.0);
+        assembly.set_joint_target(3, 1.0);
+
+        clock.advance(1000);
+        assembly.step_all(&mut motors, &mut sensors, &clock);
+
+        assert!((motors[0].velocity - 1.0).abs() < 1e-4);
+        assert!((motors[1].velocity - 2.0).abs() < 1e-4);
+        // Motors 2 & 3: v_m2 = 2.0 + 1.0 = 3.0, v_m3 = 2.0 - 1.0 = 1.0
+        assert!((motors[2].velocity - 3.0).abs() < 1e-4);
+        assert!((motors[3].velocity - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_actuator_assembly_sensor_remapping() {
+        let clock = MockClock::new();
+        let mut assembly = ActuatorAssembly::<4, 4>::new().with_downsample(1);
+
+        let mut motors = [
+            MockMotor::new(),
+            MockMotor::new(),
+            MockMotor::new(),
+            MockMotor::new(),
+        ];
+        let mut sensors = [
+            SimpleMockSensor::new(0.0),
+            SimpleMockSensor::new(0.0),
+            SimpleMockSensor::new(1.57),
+            SimpleMockSensor::new(0.0),
+        ];
+
+        // Remap motor 0 to sensor channel 2
+        assembly.set_sensor_mapping(0, 2);
+        assert_eq!(assembly.topology.sensor_map[0], 2);
+        assert_eq!(assembly.motors[0].sensor_channel, 2);
+
+        clock.advance(1000);
+        assembly.step_all(&mut motors, &mut sensors, &clock);
+
+        // Joint 0 receives angle from sensor channel 2 (1.57)
+        assert!((assembly.joint_angle(0) - 1.57).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_actuator_assembly_flash_persistence() {
+        let mut assembly = ActuatorAssembly::<4, 4>::new();
+        assembly.set_topology(TopologyPreset::Two2Dof);
+        assembly.set_sensor_mapping(0, 3);
+        assembly.set_sensor_mapping(1, 2);
+
+        let mut flash = FlashCalibrationData::default();
+        assembly.save_to_flash(&mut flash);
+        flash.update_checksum();
+
+        let block = flash.serialize_to_block();
+        let loaded_flash = FlashCalibrationData::deserialize_from_block(&block).unwrap();
+
+        let mut restored_assembly = ActuatorAssembly::<4, 4>::new();
+        restored_assembly.load_from_flash(&loaded_flash);
+
+        assert_eq!(restored_assembly.topology(), TopologyPreset::Two2Dof);
+        assert_eq!(restored_assembly.topology.sensor_map[0], 3);
+        assert_eq!(restored_assembly.topology.sensor_map[1], 2);
+        assert_eq!(restored_assembly.motors[0].sensor_channel, 3);
+        assert_eq!(restored_assembly.motors[1].sensor_channel, 2);
     }
 }

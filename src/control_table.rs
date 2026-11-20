@@ -1,8 +1,8 @@
 //! Universal Dynamixel-grade Smart Servo Control Table.
 //!
-//! Standardized, hardware-agnostic 256-byte Control Table partitioned into:
-//! - EEPROM Area (`0x00..0xA0`, 160 bytes): non-volatile configuration committed to Flash.
-//! - RAM Area (`0xA0..0x100`, 96 bytes): volatile operational targets, setpoints, and telemetry.
+//! Standardized, hardware-agnostic 384-byte Control Table partitioned into:
+//! - EEPROM Area (`0x00..0xE0`, 224 bytes): non-volatile configuration committed to Flash.
+//! - RAM Area (`0xE0..0x180`, 160 bytes): volatile operational targets, setpoints, and telemetry.
 //!
 //! # Memory Map
 //!
@@ -22,57 +22,61 @@
 //! | 0x41 | Joint2Name | str (15B) | RW | Joint 2 name (null-padded UTF-8) |
 //! | 0x50 | Joint3Addr | u8 | RW | Joint 3 servo address (0..127) |
 //! | 0x51 | Joint3Name | str (15B) | RW | Joint 3 name (null-padded UTF-8) |
-//! | 0x60 | OperatingMode | u8 | RW | Motion control mode (0..7) |
-//! | 0x61 | SecondaryId | u8 | RW | Secondary / group ID |
-//! | 0x62 | TopologyPreset | u8 | RW | Multi-motor kinematics preset (0..3, 0xFF) |
-//! | 0x63 | CouplingMask | u8 | RW | Kinematics coupling bitmask |
-//! | 0x64 | HomingOffset | f32 | RW | Homing position zero offset (rad) |
-//! | 0x68 | CurrentLimit | f32 | RW | Maximum allowable motor current (A) |
-//! | 0x6C | AccelerationLimit | f32 | RW | Maximum acceleration limit (rad/s^2) |
-//! | 0x70 | VelocityLimit | f32 | RW | Maximum velocity limit (rad/s) |
-//! | 0x74 | MinPositionLimit | f32 | RW | Minimum software travel limit (rad) |
-//! | 0x78 | MaxPositionLimit | f32 | RW | Maximum software travel limit (rad) |
-//! | 0x7C | VoltageLimit | f32 | RW | Maximum motor phase/drive voltage (V) |
-//! | 0x80 | TemperatureLimit | f32 | RW | Thermal shutdown temperature threshold (deg C) |
-//! | 0x84 | MinBusVoltage | f32 | RW | Minimum bus voltage cutoff (V) |
-//! | 0x88 | MaxBusVoltage | f32 | RW | Maximum bus voltage cutoff (V) |
-//! | 0x8C | PosPGain | f32 | RW | Position PID proportional gain Kp |
-//! | 0x90 | PosIGain | f32 | RW | Position PID integral gain Ki |
-//! | 0x94 | PosDGain | f32 | RW | Position PID derivative gain Kd |
-//! | 0x98 | VelPGain | f32 | RW | Velocity PID proportional gain Kp |
-//! | 0x9C | VelIGain | f32 | RW | Velocity PID integral gain Ki |
-//! | 0xA0 | TorqueEnable | u8 | RW | Motor bridge drive enable (0=Coast, 1=Enable) |
-//! | 0xA1 | Led | u8 | RW | Status LED output |
-//! | 0xA2 | StatusReturnLevel | u8 | RW | Comms response verbosity |
-//! | 0xA3 | RebootCommand | u8 | RW | Software reboot trigger (0xF0 = Katapult bootloader) |
-//! | 0xA4 | SaveConfigCommand | u8 | RW | Flash persistence trigger (0x55 = Save, 0xAA = Factory) |
-//! | 0xA8 | ProfileVelocity | f32 | RW | Trapezoidal trajectory maximum velocity (rad/s) |
-//! | 0xAC | ProfileAcceleration | f32 | RW | Trapezoidal trajectory acceleration (rad/s^2) |
-//! | 0xB0 | GoalPosition | f32 | RW | Target position setpoint (rad) |
-//! | 0xB4 | GoalVelocity | f32 | RW | Target velocity setpoint (rad/s) |
-//! | 0xB8 | GoalCurrent | f32 | RW | Target current / torque setpoint (A) |
-//! | 0xBC | GoalVoltage | f32 | RW | Target drive voltage setpoint (V) |
-//! | 0xC0 | HardwareErrorStatus | u16 | RO | Active hardware fault bitfield |
-//! | 0xC2 | PresentTemperature | f32 | RO | Measured internal MCU / stage temperature (deg C) |
-//! | 0xC4 | PresentPosition | f32 | RO | Measured shaft / joint position (rad) |
-//! | 0xC8 | PresentVelocity | f32 | RO | Measured shaft velocity (rad/s) |
-//! | 0xCC | PresentCurrent | f32 | RO | Measured motor current (A) |
-//! | 0xD0 | PresentVoltage | f32 | RO | Commanded / applied phase voltage (V) |
-//! | 0xD4 | PresentBusVoltage | f32 | RO | Measured DC supply / bus voltage (V) |
-//! | 0xD8 | FilteredCurrent | f32 | RO | Low-pass filtered current telemetry (A) |
-//! | 0xDC | TrajectoryPosition | f32 | RO | Instantaneous trajectory generator position setpoint (rad) |
-//! | 0xE0 | Moving | u8 | RO | Motion profile active flag (1=in motion, 0=stopped) |
-//! | 0xE2 | MultiTurnRevolutions | i32 | RO | Cumulative completed shaft revolutions |
-//! | 0xE6 | MultiTurnAngle | f32 | RO | Cumulative unwrapped multi-turn angle (rad) |
+//! | 0x60..0x7F | Motor0Bank | 32B | RW | Motor 0 electrical & calibration parameters |
+//! | 0x80..0x9F | Motor1Bank | 32B | RW | Motor 1 electrical & calibration parameters |
+//! | 0xA0..0xBF | Motor2Bank | 32B | RW | Motor 2 electrical & calibration parameters |
+//! | 0xC0..0xDF | Motor3Bank | 32B | RW | Motor 3 electrical & calibration parameters |
+//! | 0xE0 | OperatingMode | u8 | RW | Motion control mode (0..7) |
+//! | 0xE1 | SecondaryId | u8 | RW | Secondary / group ID |
+//! | 0xE2 | TopologyPreset | u8 | RW | Multi-motor kinematics preset (0..3, 0xFF) |
+//! | 0xE3 | CouplingMask | u8 | RW | Kinematics coupling bitmask |
+//! | 0xE4 | HomingOffset | f32 | RW | Homing position zero offset (rad) |
+//! | 0xE8 | CurrentLimit | f32 | RW | Maximum allowable motor current (A) |
+//! | 0xEC | AccelerationLimit | f32 | RW | Maximum acceleration limit (rad/s^2) |
+//! | 0xF0 | VelocityLimit | f32 | RW | Maximum velocity limit (rad/s) |
+//! | 0xF4 | MinPositionLimit | f32 | RW | Minimum software travel limit (rad) |
+//! | 0xF8 | MaxPositionLimit | f32 | RW | Maximum software travel limit (rad) |
+//! | 0xFC | VoltageLimit | f32 | RW | Maximum motor phase/drive voltage (V) |
+//! | 0x100 | TemperatureLimit | f32 | RW | Thermal shutdown temperature threshold (deg C) |
+//! | 0x104 | MinBusVoltage | f32 | RW | Minimum bus voltage cutoff (V) |
+//! | 0x108 | MaxBusVoltage | f32 | RW | Maximum bus voltage cutoff (V) |
+//! | 0x10C | PosPGain | f32 | RW | Position PID proportional gain Kp |
+//! | 0x110 | PosIGain | f32 | RW | Position PID integral gain Ki |
+//! | 0x114 | PosDGain | f32 | RW | Position PID derivative gain Kd |
+//! | 0x118 | VelPGain | f32 | RW | Velocity PID proportional gain Kp |
+//! | 0x11C | VelIGain | f32 | RW | Velocity PID integral gain Ki |
+//! | 0x120 | TorqueEnable | u8 | RW | Motor bridge drive enable (0=Coast, 1=Enable) |
+//! | 0x121 | Led | u8 | RW | Status LED output |
+//! | 0x122 | StatusReturnLevel | u8 | RW | Comms response verbosity |
+//! | 0x123 | RebootCommand | u8 | RW | Software reboot trigger (0xF0 = Katapult bootloader) |
+//! | 0x124 | SaveConfigCommand | u8 | RW | Flash persistence trigger (0x55 = Save, 0xAA = Factory) |
+//! | 0x128 | ProfileVelocity | f32 | RW | Trapezoidal trajectory maximum velocity (rad/s) |
+//! | 0x12C | ProfileAcceleration | f32 | RW | Trapezoidal trajectory acceleration (rad/s^2) |
+//! | 0x130 | GoalPosition | f32 | RW | Target position setpoint (rad) |
+//! | 0x134 | GoalVelocity | f32 | RW | Target velocity setpoint (rad/s) |
+//! | 0x138 | GoalCurrent | f32 | RW | Target current / torque setpoint (A) |
+//! | 0x13C | GoalVoltage | f32 | RW | Target drive voltage setpoint (V) |
+//! | 0x140 | HardwareErrorStatus | u16 | RO | Active hardware fault bitfield |
+//! | 0x142 | PresentTemperature | f32 | RO | Measured internal MCU / stage temperature (deg C) |
+//! | 0x144 | PresentPosition | f32 | RO | Measured shaft / joint position (rad) |
+//! | 0x148 | PresentVelocity | f32 | RO | Measured shaft velocity (rad/s) |
+//! | 0x14C | PresentCurrent | f32 | RO | Measured motor current (A) |
+//! | 0x150 | PresentVoltage | f32 | RO | Commanded / applied phase voltage (V) |
+//! | 0x154 | PresentBusVoltage | f32 | RO | Measured DC supply / bus voltage (V) |
+//! | 0x158 | FilteredCurrent | f32 | RO | Low-pass filtered current telemetry (A) |
+//! | 0x15C | TrajectoryPosition | f32 | RO | Instantaneous trajectory generator position setpoint (rad) |
+//! | 0x160 | Moving | u8 | RO | Motion profile active flag (1=in motion, 0=stopped) |
+//! | 0x162 | MultiTurnRevolutions | i32 | RO | Cumulative completed shaft revolutions |
+//! | 0x166 | MultiTurnAngle | f32 | RO | Cumulative unwrapped multi-turn angle (rad) |
 
 /// Total byte capacity of the standardized Control Table.
-pub const CONTROL_TABLE_SIZE: usize = 256;
+pub const CONTROL_TABLE_SIZE: usize = 384;
 
 /// Byte offset marking the boundary between EEPROM and RAM areas.
-pub const EEPROM_AREA_SIZE: usize = 160;
+pub const EEPROM_AREA_SIZE: usize = 224;
 
 /// Byte size of the volatile RAM register area.
-pub const RAM_AREA_SIZE: usize = 96;
+pub const RAM_AREA_SIZE: usize = 160;
 
 // Register byte offsets
 pub const REG_MODEL_NUMBER: usize = 0x00;
@@ -95,55 +99,87 @@ pub const REG_JOINT2_NAME: usize = 0x41;
 pub const REG_JOINT3_ADDR: usize = 0x50;
 pub const REG_JOINT3_NAME: usize = 0x51;
 
-// Configuration & Limits in EEPROM (0x60..0xA0)
-pub const REG_OPERATING_MODE: usize = 0x60;
-pub const REG_SECONDARY_ID: usize = 0x61;
-pub const REG_TOPOLOGY_PRESET: usize = 0x62;
-pub const REG_COUPLING_MASK: usize = 0x63;
-pub const REG_HOMING_OFFSET: usize = 0x64;
-pub const REG_CURRENT_LIMIT: usize = 0x68;
-pub const REG_ACCELERATION_LIMIT: usize = 0x6C;
-pub const REG_VELOCITY_LIMIT: usize = 0x70;
-pub const REG_MIN_POSITION_LIMIT: usize = 0x74;
-pub const REG_MAX_POSITION_LIMIT: usize = 0x78;
-pub const REG_VOLTAGE_LIMIT: usize = 0x7C;
-pub const REG_TEMPERATURE_LIMIT: usize = 0x80;
-pub const REG_MIN_BUS_VOLTAGE: usize = 0x84;
-pub const REG_MAX_BUS_VOLTAGE: usize = 0x88;
-pub const REG_POS_P_GAIN: usize = 0x8C;
-pub const REG_POS_I_GAIN: usize = 0x90;
-pub const REG_POS_D_GAIN: usize = 0x94;
-pub const REG_VEL_P_GAIN: usize = 0x98;
-pub const REG_VEL_I_GAIN: usize = 0x9C;
-pub const REG_VEL_D_GAIN: usize = 0x9C;
-pub const REG_CURRENT_P_GAIN: usize = 0x9C;
-pub const REG_CURRENT_I_GAIN: usize = 0x9C;
-pub const REG_CURRENT_D_GAIN: usize = 0x9C;
+// Linear 4-Axis Motor Bank (0x60..0xDF, 32 bytes per slot)
+pub const MOTOR_BANK_START: usize = 0x60;
+pub const MOTOR_SLOT_SIZE: usize = 32;
 
-// Volatile RAM area (0xA0..0x100)
-pub const REG_TORQUE_ENABLE: usize = 0xA0;
-pub const REG_LED: usize = 0xA1;
-pub const REG_STATUS_RETURN_LEVEL: usize = 0xA2;
-pub const REG_REBOOT_CMD: usize = 0xA3;
-pub const REG_SAVE_CONFIG_CMD: usize = 0xA4;
-pub const REG_PROFILE_VELOCITY: usize = 0xA8;
-pub const REG_PROFILE_ACCELERATION: usize = 0xAC;
-pub const REG_GOAL_POSITION: usize = 0xB0;
-pub const REG_GOAL_VELOCITY: usize = 0xB4;
-pub const REG_GOAL_CURRENT: usize = 0xB8;
-pub const REG_GOAL_VOLTAGE: usize = 0xBC;
-pub const REG_HARDWARE_ERROR_STATUS: usize = 0xC0;
-pub const REG_PRESENT_TEMPERATURE: usize = 0xC2;
-pub const REG_PRESENT_POSITION: usize = 0xC4;
-pub const REG_PRESENT_VELOCITY: usize = 0xC8;
-pub const REG_PRESENT_CURRENT: usize = 0xCC;
-pub const REG_PRESENT_VOLTAGE: usize = 0xD0;
-pub const REG_PRESENT_BUS_VOLTAGE: usize = 0xD4;
-pub const REG_FILTERED_CURRENT: usize = 0xD8;
-pub const REG_TRAJECTORY_POSITION: usize = 0xDC;
-pub const REG_MOVING: usize = 0xE0;
-pub const REG_MULTI_TURN_REVOLUTIONS: usize = 0xE2;
-pub const REG_MULTI_TURN_ANGLE: usize = 0xE6;
+pub const REG_MOTOR0_BASE: usize = 0x60;
+pub const REG_MOTOR1_BASE: usize = 0x80;
+pub const REG_MOTOR2_BASE: usize = 0xA0;
+pub const REG_MOTOR3_BASE: usize = 0xC0;
+
+// Per-motor register offset constants (relative to motor slot base)
+#[allow(non_upper_case_globals)]
+pub const REG_MOTORx_POLE_PAIRS: usize = 0x00;
+#[allow(non_upper_case_globals)]
+pub const REG_MOTORx_PHASE_RESISTANCE: usize = 0x02;
+#[allow(non_upper_case_globals)]
+pub const REG_MOTORx_PHASE_INDUCTANCE: usize = 0x06;
+#[allow(non_upper_case_globals)]
+pub const REG_MOTORx_KV_RATING: usize = 0x0A;
+#[allow(non_upper_case_globals)]
+pub const REG_MOTORx_ZERO_ELECTRIC_ANGLE: usize = 0x0E;
+#[allow(non_upper_case_globals)]
+pub const REG_MOTORx_SENSOR_DIRECTION: usize = 0x12;
+#[allow(non_upper_case_globals)]
+pub const REG_MOTORx_SENSOR_TYPE: usize = 0x13;
+#[allow(non_upper_case_globals)]
+pub const REG_MOTORx_VOLTAGE_ALIGN: usize = 0x14;
+#[allow(non_upper_case_globals)]
+pub const REG_MOTORx_HOMING_OFFSET: usize = 0x18;
+#[allow(non_upper_case_globals)]
+pub const REG_MOTORx_CURRENT_OFFSET_A: usize = 0x1C;
+#[allow(non_upper_case_globals)]
+pub const REG_MOTORx_CURRENT_OFFSET_B: usize = 0x20;
+
+// Volatile RAM area (0xE0..0x180)
+pub const REG_OPERATING_MODE: usize = 0xE0;
+pub const REG_SECONDARY_ID: usize = 0xE1;
+pub const REG_TOPOLOGY_PRESET: usize = 0xE2;
+pub const REG_COUPLING_MASK: usize = 0xE3;
+pub const REG_HOMING_OFFSET: usize = 0xE4;
+pub const REG_CURRENT_LIMIT: usize = 0xE8;
+pub const REG_ACCELERATION_LIMIT: usize = 0xEC;
+pub const REG_VELOCITY_LIMIT: usize = 0xF0;
+pub const REG_MIN_POSITION_LIMIT: usize = 0xF4;
+pub const REG_MAX_POSITION_LIMIT: usize = 0xF8;
+pub const REG_VOLTAGE_LIMIT: usize = 0xFC;
+pub const REG_TEMPERATURE_LIMIT: usize = 0x100;
+pub const REG_MIN_BUS_VOLTAGE: usize = 0x104;
+pub const REG_MAX_BUS_VOLTAGE: usize = 0x108;
+pub const REG_POS_P_GAIN: usize = 0x10C;
+pub const REG_POS_I_GAIN: usize = 0x110;
+pub const REG_POS_D_GAIN: usize = 0x114;
+pub const REG_VEL_P_GAIN: usize = 0x118;
+pub const REG_VEL_I_GAIN: usize = 0x11C;
+pub const REG_VEL_D_GAIN: usize = 0x11C;
+pub const REG_CURRENT_P_GAIN: usize = 0x11C;
+pub const REG_CURRENT_I_GAIN: usize = 0x11C;
+pub const REG_CURRENT_D_GAIN: usize = 0x11C;
+
+pub const REG_TORQUE_ENABLE: usize = 0x120;
+pub const REG_LED: usize = 0x121;
+pub const REG_STATUS_RETURN_LEVEL: usize = 0x122;
+pub const REG_REBOOT_CMD: usize = 0x123;
+pub const REG_SAVE_CONFIG_CMD: usize = 0x124;
+pub const REG_PROFILE_VELOCITY: usize = 0x128;
+pub const REG_PROFILE_ACCELERATION: usize = 0x12C;
+pub const REG_GOAL_POSITION: usize = 0x130;
+pub const REG_GOAL_VELOCITY: usize = 0x134;
+pub const REG_GOAL_CURRENT: usize = 0x138;
+pub const REG_GOAL_VOLTAGE: usize = 0x13C;
+pub const REG_HARDWARE_ERROR_STATUS: usize = 0x140;
+pub const REG_PRESENT_TEMPERATURE: usize = 0x142;
+pub const REG_PRESENT_POSITION: usize = 0x144;
+pub const REG_PRESENT_VELOCITY: usize = 0x148;
+pub const REG_PRESENT_CURRENT: usize = 0x14C;
+pub const REG_PRESENT_VOLTAGE: usize = 0x150;
+pub const REG_PRESENT_BUS_VOLTAGE: usize = 0x154;
+pub const REG_FILTERED_CURRENT: usize = 0x158;
+pub const REG_TRAJECTORY_POSITION: usize = 0x15C;
+pub const REG_MOVING: usize = 0x160;
+pub const REG_MULTI_TURN_REVOLUTIONS: usize = 0x162;
+pub const REG_MULTI_TURN_ANGLE: usize = 0x166;
 
 /// Trigger value written to `RebootCommand` (0x63) to request BareBoot Katapult bootloader.
 pub const CMD_REBOOT_BOOTLOADER: u8 = 0xF0;
@@ -245,7 +281,7 @@ pub mod error_flags {
     pub const FLASH_CORRUPT: u16 = 1 << 7;
 }
 
-/// Standardized 176-byte Control Table data structure.
+/// Standardized 384-byte Control Table data structure.
 #[derive(Clone, Copy)]
 pub struct ControlTable {
     bytes: [u8; CONTROL_TABLE_SIZE],
@@ -287,6 +323,13 @@ impl ControlTable {
         self.write_u8(REG_JOINT1_ADDR, 1);
         self.write_u8(REG_JOINT2_ADDR, 2);
         self.write_u8(REG_JOINT3_ADDR, 3);
+
+        // Linear 4-Axis Motor Bank Defaults (0x60..0xDF)
+        for i in 0..4 {
+            self.set_motor_zero_electric_angle(i, f32::NAN);
+            self.set_motor_sensor_direction(i, 0); // UNKNOWN
+        }
+
         self.write_u8(REG_OPERATING_MODE, OperatingMode::Position as u8);
         self.write_u8(REG_SECONDARY_ID, 0xFD);
         self.write_u8(REG_TOPOLOGY_PRESET, TopologyPreset::Independent4x1Dof as u8);
@@ -323,7 +366,7 @@ impl ControlTable {
         self.write_f32(REG_PROFILE_ACCELERATION, 25.0);
     }
 
-    /// Read an immutable byte slice of the entire 256-byte table.
+    /// Read an immutable byte slice of the entire 384-byte table.
     pub fn as_bytes(&self) -> &[u8; CONTROL_TABLE_SIZE] {
         &self.bytes
     }
@@ -333,25 +376,25 @@ impl ControlTable {
         &mut self.bytes
     }
 
-    /// Read an immutable view of the 160-byte non-volatile EEPROM section.
+    /// Read an immutable view of the 224-byte non-volatile EEPROM section.
     pub fn eeprom_bytes(&self) -> &[u8; EEPROM_AREA_SIZE] {
         let slice: &[u8] = &self.bytes[0..EEPROM_AREA_SIZE];
         slice.try_into().unwrap()
     }
 
-    /// Read a mutable view of the 160-byte non-volatile EEPROM section.
+    /// Read a mutable view of the 224-byte non-volatile EEPROM section.
     pub fn eeprom_bytes_mut(&mut self) -> &mut [u8; EEPROM_AREA_SIZE] {
         let slice: &mut [u8] = &mut self.bytes[0..EEPROM_AREA_SIZE];
         slice.try_into().unwrap()
     }
 
-    /// Read an immutable view of the 96-byte volatile RAM section.
+    /// Read an immutable view of the 160-byte volatile RAM section.
     pub fn ram_bytes(&self) -> &[u8; RAM_AREA_SIZE] {
         let slice: &[u8] = &self.bytes[EEPROM_AREA_SIZE..CONTROL_TABLE_SIZE];
         slice.try_into().unwrap()
     }
 
-    /// Read a mutable view of the 96-byte volatile RAM section.
+    /// Read a mutable view of the 160-byte volatile RAM section.
     pub fn ram_bytes_mut(&mut self) -> &mut [u8; RAM_AREA_SIZE] {
         let slice: &mut [u8] = &mut self.bytes[EEPROM_AREA_SIZE..CONTROL_TABLE_SIZE];
         slice.try_into().unwrap()
@@ -515,6 +558,185 @@ impl ControlTable {
         let copy_len = bytes.len().min(15);
         self.bytes[offset..offset + copy_len].copy_from_slice(&bytes[..copy_len]);
         self.bytes[offset + copy_len..offset + 15].fill(0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Motor Bank Parameter Accessors (Index 0..3)
+    // -----------------------------------------------------------------------
+
+    #[inline]
+    fn motor_base(index: usize) -> Option<usize> {
+        if index < 4 {
+            Some(MOTOR_BANK_START + index * MOTOR_SLOT_SIZE)
+        } else {
+            None
+        }
+    }
+
+    /// Read motor pole pairs (u16) for motor `index` (0..3).
+    pub fn motor_pole_pairs(&self, index: usize) -> u16 {
+        match Self::motor_base(index) {
+            Some(base) => self.read_u16(base + REG_MOTORx_POLE_PAIRS),
+            None => 0,
+        }
+    }
+
+    /// Set motor pole pairs (u16) for motor `index` (0..3).
+    pub fn set_motor_pole_pairs(&mut self, index: usize, val: u16) {
+        if let Some(base) = Self::motor_base(index) {
+            self.write_u16(base + REG_MOTORx_POLE_PAIRS, val);
+        }
+    }
+
+    /// Read motor phase resistance in Ohms (f32) for motor `index` (0..3).
+    pub fn motor_phase_resistance(&self, index: usize) -> f32 {
+        match Self::motor_base(index) {
+            Some(base) => self.read_f32(base + REG_MOTORx_PHASE_RESISTANCE),
+            None => 0.0,
+        }
+    }
+
+    /// Set motor phase resistance in Ohms (f32) for motor `index` (0..3).
+    pub fn set_motor_phase_resistance(&mut self, index: usize, val: f32) {
+        if let Some(base) = Self::motor_base(index) {
+            self.write_f32(base + REG_MOTORx_PHASE_RESISTANCE, val);
+        }
+    }
+
+    /// Read motor phase inductance in Henries (f32) for motor `index` (0..3).
+    pub fn motor_phase_inductance(&self, index: usize) -> f32 {
+        match Self::motor_base(index) {
+            Some(base) => self.read_f32(base + REG_MOTORx_PHASE_INDUCTANCE),
+            None => 0.0,
+        }
+    }
+
+    /// Set motor phase inductance in Henries (f32) for motor `index` (0..3).
+    pub fn set_motor_phase_inductance(&mut self, index: usize, val: f32) {
+        if let Some(base) = Self::motor_base(index) {
+            self.write_f32(base + REG_MOTORx_PHASE_INDUCTANCE, val);
+        }
+    }
+
+    /// Read motor KV rating (rpm/V) (f32) for motor `index` (0..3).
+    pub fn motor_kv_rating(&self, index: usize) -> f32 {
+        match Self::motor_base(index) {
+            Some(base) => self.read_f32(base + REG_MOTORx_KV_RATING),
+            None => 0.0,
+        }
+    }
+
+    /// Set motor KV rating (rpm/V) (f32) for motor `index` (0..3).
+    pub fn set_motor_kv_rating(&mut self, index: usize, val: f32) {
+        if let Some(base) = Self::motor_base(index) {
+            self.write_f32(base + REG_MOTORx_KV_RATING, val);
+        }
+    }
+
+    /// Read calibrated zero electrical angle (f32, rad) for motor `index` (0..3).
+    /// Returns `f32::NAN` if uncalibrated or index is out of bounds.
+    pub fn motor_zero_electric_angle(&self, index: usize) -> f32 {
+        match Self::motor_base(index) {
+            Some(base) => self.read_f32(base + REG_MOTORx_ZERO_ELECTRIC_ANGLE),
+            None => f32::NAN,
+        }
+    }
+
+    /// Set calibrated zero electrical angle (f32, rad) for motor `index` (0..3).
+    pub fn set_motor_zero_electric_angle(&mut self, index: usize, val: f32) {
+        if let Some(base) = Self::motor_base(index) {
+            self.write_f32(base + REG_MOTORx_ZERO_ELECTRIC_ANGLE, val);
+        }
+    }
+
+    /// Read calibrated sensor direction (u8: 0=Unknown, 1=CW, 255=CCW) for motor `index` (0..3).
+    pub fn motor_sensor_direction(&self, index: usize) -> u8 {
+        match Self::motor_base(index) {
+            Some(base) => self.read_u8(base + REG_MOTORx_SENSOR_DIRECTION),
+            None => 0,
+        }
+    }
+
+    /// Set calibrated sensor direction (u8: 0=Unknown, 1=CW, 255=CCW) for motor `index` (0..3).
+    pub fn set_motor_sensor_direction(&mut self, index: usize, val: u8) {
+        if let Some(base) = Self::motor_base(index) {
+            self.write_u8(base + REG_MOTORx_SENSOR_DIRECTION, val);
+        }
+    }
+
+    /// Read sensor type (u8: 0=Default Onboard, 1=AS5600, 2=MT6701, 3=ABZ) for motor `index` (0..3).
+    pub fn motor_sensor_type(&self, index: usize) -> u8 {
+        match Self::motor_base(index) {
+            Some(base) => self.read_u8(base + REG_MOTORx_SENSOR_TYPE),
+            None => 0,
+        }
+    }
+
+    /// Set sensor type (u8: 0=Default Onboard, 1=AS5600, 2=MT6701, 3=ABZ) for motor `index` (0..3).
+    pub fn set_motor_sensor_type(&mut self, index: usize, val: u8) {
+        if let Some(base) = Self::motor_base(index) {
+            self.write_u8(base + REG_MOTORx_SENSOR_TYPE, val);
+        }
+    }
+
+    /// Read voltage alignment magnitude (f32, V) for motor `index` (0..3).
+    pub fn motor_voltage_align(&self, index: usize) -> f32 {
+        match Self::motor_base(index) {
+            Some(base) => self.read_f32(base + REG_MOTORx_VOLTAGE_ALIGN),
+            None => 0.0,
+        }
+    }
+
+    /// Set voltage alignment magnitude (f32, V) for motor `index` (0..3).
+    pub fn set_motor_voltage_align(&mut self, index: usize, val: f32) {
+        if let Some(base) = Self::motor_base(index) {
+            self.write_f32(base + REG_MOTORx_VOLTAGE_ALIGN, val);
+        }
+    }
+
+    /// Read motor homing offset (f32, rad) for motor `index` (0..3).
+    pub fn motor_homing_offset(&self, index: usize) -> f32 {
+        match Self::motor_base(index) {
+            Some(base) => self.read_f32(base + REG_MOTORx_HOMING_OFFSET),
+            None => 0.0,
+        }
+    }
+
+    /// Set motor homing offset (f32, rad) for motor `index` (0..3).
+    pub fn set_motor_homing_offset(&mut self, index: usize, val: f32) {
+        if let Some(base) = Self::motor_base(index) {
+            self.write_f32(base + REG_MOTORx_HOMING_OFFSET, val);
+        }
+    }
+
+    /// Read motor phase A current sense offset (f32, A) for motor `index` (0..3).
+    pub fn motor_current_offset_a(&self, index: usize) -> f32 {
+        match Self::motor_base(index) {
+            Some(base) => self.read_f32(base + REG_MOTORx_CURRENT_OFFSET_A),
+            None => 0.0,
+        }
+    }
+
+    /// Set motor phase A current sense offset (f32, A) for motor `index` (0..3).
+    pub fn set_motor_current_offset_a(&mut self, index: usize, val: f32) {
+        if let Some(base) = Self::motor_base(index) {
+            self.write_f32(base + REG_MOTORx_CURRENT_OFFSET_A, val);
+        }
+    }
+
+    /// Read motor phase B current sense offset (f32, A) for motor `index` (0..3).
+    pub fn motor_current_offset_b(&self, index: usize) -> f32 {
+        match Self::motor_base(index) {
+            Some(base) => self.read_f32(base + REG_MOTORx_CURRENT_OFFSET_B),
+            None => 0.0,
+        }
+    }
+
+    /// Set motor phase B current sense offset (f32, A) for motor `index` (0..3).
+    pub fn set_motor_current_offset_b(&mut self, index: usize, val: f32) {
+        if let Some(base) = Self::motor_base(index) {
+            self.write_f32(base + REG_MOTORx_CURRENT_OFFSET_B, val);
+        }
     }
 
     pub fn node_id(&self) -> u8 {
@@ -730,9 +952,9 @@ mod tests {
     #[test]
     fn test_control_table_size_and_partitions() {
         let table = ControlTable::new();
-        assert_eq!(table.as_bytes().len(), 256);
-        assert_eq!(table.eeprom_bytes().len(), 160);
-        assert_eq!(table.ram_bytes().len(), 96);
+        assert_eq!(table.as_bytes().len(), 384);
+        assert_eq!(table.eeprom_bytes().len(), 224);
+        assert_eq!(table.ram_bytes().len(), 160);
     }
 
     #[test]
@@ -911,5 +1133,144 @@ mod tests {
         // Undervoltage flag
         table.evaluate_errors(0.5, 2.5, 45.0); // Min bus is 3.0V
         assert_ne!(table.hardware_error_status() & error_flags::UNDERVOLTAGE, 0);
+    }
+
+    #[test]
+    fn test_motor_bank_factory_defaults() {
+        let table = ControlTable::new();
+        for i in 0..4 {
+            assert!(table.motor_zero_electric_angle(i).is_nan());
+            assert_eq!(table.motor_sensor_direction(i), 0);
+            assert_eq!(table.motor_pole_pairs(i), 0);
+            assert_eq!(table.motor_phase_resistance(i), 0.0);
+            assert_eq!(table.motor_phase_inductance(i), 0.0);
+            assert_eq!(table.motor_kv_rating(i), 0.0);
+            assert_eq!(table.motor_sensor_type(i), 0);
+            assert_eq!(table.motor_voltage_align(i), 0.0);
+            assert_eq!(table.motor_homing_offset(i), 0.0);
+            assert_eq!(table.motor_current_offset_a(i), 0.0);
+        }
+    }
+
+    #[test]
+    fn test_motor_bank_accessors_and_bounds() {
+        let mut table = ControlTable::new();
+
+        // Write unique values to Motor 0..3 within 32-byte slot
+        for i in 0..4 {
+            let pp = (7 + i) as u16;
+            let r = 0.5 + (i as f32) * 0.2;
+            let l = 0.0001 * ((i + 1) as f32);
+            let kv = 1000.0 + (i as f32) * 200.0;
+            let zero = 1.0 + (i as f32) * 0.5;
+            let dir = if i % 2 == 0 { 1 } else { 255 };
+            let st = (i + 1) as u8;
+            let va = 3.0 + (i as f32) * 0.5;
+            let ho = -0.5 + (i as f32) * 0.1;
+            let ca = 0.01 * ((i + 1) as f32);
+
+            table.set_motor_pole_pairs(i, pp);
+            table.set_motor_phase_resistance(i, r);
+            table.set_motor_phase_inductance(i, l);
+            table.set_motor_kv_rating(i, kv);
+            table.set_motor_zero_electric_angle(i, zero);
+            table.set_motor_sensor_direction(i, dir);
+            table.set_motor_sensor_type(i, st);
+            table.set_motor_voltage_align(i, va);
+            table.set_motor_homing_offset(i, ho);
+            table.set_motor_current_offset_a(i, ca);
+        }
+
+        // Verify values and check slot isolation
+        for i in 0..4 {
+            let pp = (7 + i) as u16;
+            let r = 0.5 + (i as f32) * 0.2;
+            let l = 0.0001 * ((i + 1) as f32);
+            let kv = 1000.0 + (i as f32) * 200.0;
+            let zero = 1.0 + (i as f32) * 0.5;
+            let dir = if i % 2 == 0 { 1 } else { 255 };
+            let st = (i + 1) as u8;
+            let va = 3.0 + (i as f32) * 0.5;
+            let ho = -0.5 + (i as f32) * 0.1;
+            let ca = 0.01 * ((i + 1) as f32);
+
+            assert_eq!(table.motor_pole_pairs(i), pp);
+            assert!((table.motor_phase_resistance(i) - r).abs() < 1e-6);
+            assert!((table.motor_phase_inductance(i) - l).abs() < 1e-7);
+            assert!((table.motor_kv_rating(i) - kv).abs() < 1e-4);
+            assert!((table.motor_zero_electric_angle(i) - zero).abs() < 1e-6);
+            assert_eq!(table.motor_sensor_direction(i), dir);
+            assert_eq!(table.motor_sensor_type(i), st);
+            assert!((table.motor_voltage_align(i) - va).abs() < 1e-6);
+            assert!((table.motor_homing_offset(i) - ho).abs() < 1e-6);
+            assert!((table.motor_current_offset_a(i) - ca).abs() < 1e-6);
+        }
+
+        // Out of bounds checking (index 4 and 5)
+        assert_eq!(table.motor_pole_pairs(4), 0);
+        assert_eq!(table.motor_phase_resistance(4), 0.0);
+        assert_eq!(table.motor_phase_inductance(4), 0.0);
+        assert_eq!(table.motor_kv_rating(4), 0.0);
+        assert!(table.motor_zero_electric_angle(4).is_nan());
+        assert_eq!(table.motor_sensor_direction(4), 0);
+        assert_eq!(table.motor_sensor_type(4), 0);
+        assert_eq!(table.motor_voltage_align(4), 0.0);
+        assert_eq!(table.motor_homing_offset(4), 0.0);
+        assert_eq!(table.motor_current_offset_a(4), 0.0);
+        assert_eq!(table.motor_current_offset_b(4), 0.0);
+
+        // Out of bounds set is a safe no-op
+        table.set_motor_pole_pairs(4, 99);
+        table.set_motor_phase_resistance(4, 99.0);
+        table.set_motor_zero_electric_angle(4, 99.0);
+        table.set_motor_sensor_direction(4, 99);
+        assert_eq!(table.motor_pole_pairs(4), 0);
+    }
+
+    #[test]
+    fn test_motor_bank_nan_serialization() {
+        let mut table = ControlTable::new();
+
+        // Starts as NaN
+        assert!(table.motor_zero_electric_angle(0).is_nan());
+
+        // Set concrete value
+        table.set_motor_zero_electric_angle(0, 2.5);
+        assert_eq!(table.motor_zero_electric_angle(0), 2.5);
+
+        // Reset back to NaN
+        table.set_motor_zero_electric_angle(0, f32::NAN);
+        assert!(table.motor_zero_electric_angle(0).is_nan());
+    }
+
+    #[test]
+    fn test_motor_bank_eeprom_persistence_roundtrip() {
+        let mut table = ControlTable::new();
+        table.set_motor_pole_pairs(0, 14);
+        table.set_motor_phase_resistance(0, 0.35);
+        table.set_motor_zero_electric_angle(0, 1.57079);
+        table.set_motor_sensor_direction(0, 1);
+        table.set_motor_sensor_type(0, 2);
+
+        table.set_motor_pole_pairs(3, 7);
+        table.set_motor_phase_resistance(3, 1.2);
+        table.set_motor_zero_electric_angle(3, -2.1);
+        table.set_motor_sensor_direction(3, 255);
+
+        let saved = *table.eeprom_bytes();
+
+        let mut restored = ControlTable::empty();
+        restored.eeprom_bytes_mut().copy_from_slice(&saved);
+
+        assert_eq!(restored.motor_pole_pairs(0), 14);
+        assert!((restored.motor_phase_resistance(0) - 0.35).abs() < 1e-6);
+        assert!((restored.motor_zero_electric_angle(0) - 1.57079).abs() < 1e-5);
+        assert_eq!(restored.motor_sensor_direction(0), 1);
+        assert_eq!(restored.motor_sensor_type(0), 2);
+
+        assert_eq!(restored.motor_pole_pairs(3), 7);
+        assert!((restored.motor_phase_resistance(3) - 1.2).abs() < 1e-6);
+        assert!((restored.motor_zero_electric_angle(3) - -2.1).abs() < 1e-5);
+        assert_eq!(restored.motor_sensor_direction(3), 255);
     }
 }

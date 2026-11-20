@@ -36,12 +36,16 @@ pub mod common;
 
 pub mod traits;
 
+pub mod control_table;
+pub use control_table::ControlTable;
+
 #[cfg(feature = "boot")]
 pub mod boot;
 
 // BareBoot application-side entry abstraction (optional `boot` feature).
 #[cfg(feature = "boot")]
-pub use traits::BootTargetProvider;
+pub use traits::{BootTargetProvider, BootloaderHandoff};
+pub use traits::ConfigStorage;
 
 pub mod sensors;
 

@@ -14,6 +14,8 @@
 
 #![allow(non_camel_case_types)]
 
+pub mod can;
 pub mod commander;
 pub mod debug;
 pub mod step_dir;
+

@@ -21,6 +21,7 @@ pub mod actuator;
 pub mod assembly;
 pub mod calibration;
 pub mod sensor;
+pub mod trajectory;
 pub mod transmission;
 
 pub use actuator::{Actuator1DOF, Actuator2DOF, MotorControl};
@@ -34,6 +35,7 @@ pub use calibration::{
     InteractiveCalibrator, InteractiveState, StorageError,
 };
 pub use sensor::{AxisView, DualSensorAdapter, MockSensor2D, Sensor2D};
+pub use trajectory::{MultiTurnAccumulator, TrapezoidalTrajectory};
 pub use transmission::{
     AnalyticalLinkage, CoupledDifferential, DynamicTransmission, EccentricCam, FourBarBranch,
     FourBarLinkage, LinearGear, LutTransmission, Transmission,

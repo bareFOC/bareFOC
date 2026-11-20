@@ -19,12 +19,14 @@ pub mod bootloader;
 pub mod current_sense;
 pub mod driver;
 pub mod sensor;
+pub mod storage;
 
 pub use adc::AdcPin;
 #[cfg(feature = "boot")]
-pub use bootloader::BootTargetProvider;
+pub use bootloader::{BootTargetProvider, BootloaderHandoff};
 pub use current_sense::{CurrentSense, CurrentSenseBase};
 pub use driver::{DriverType, FOCDriver, FocDriverParams, PhaseState};
 pub use sensor::{Direction, Sensor, SensorBase};
+pub use storage::ConfigStorage;
 pub use crate::common::time::Clock;
 

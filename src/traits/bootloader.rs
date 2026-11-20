@@ -25,3 +25,11 @@ pub trait BootTargetProvider {
         self.boot_target().is_present()
     }
 }
+
+/// Disarms motor PWM bridges into high-impedance Coast mode and initiates
+/// the BareBoot / Katapult bootloader hand-off sequence across system reset.
+pub trait BootloaderHandoff {
+    /// Perform safety disarm and enter the bootloader. Never returns.
+    fn enter_bootloader(&mut self) -> !;
+}
+

@@ -46,6 +46,7 @@ pub mod boot;
 #[cfg(feature = "boot")]
 pub use traits::{BootTargetProvider, BootloaderHandoff};
 pub use traits::ConfigStorage;
+pub use traits::{CANONICAL_HEX_LEN, HardwareUid, MAX_UID_BYTES, StaticUid};
 
 pub mod sensors;
 

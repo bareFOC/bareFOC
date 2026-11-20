@@ -127,6 +127,10 @@ pub struct JointTelemetry {
     pub pid_i: f32,
     /// Outer position loop derivative gain.
     pub pid_d: f32,
+    /// Joint bus address (0-127).
+    pub addr: u8,
+    /// Joint name UTF-8 bytes null-padded (15 bytes).
+    pub name: [u8; 15],
 }
 
 impl Default for JointTelemetry {
@@ -140,6 +144,8 @@ impl Default for JointTelemetry {
             pid_p: 20.0,
             pid_i: 0.0,
             pid_d: 0.0,
+            addr: 0,
+            name: [0u8; 15],
         }
     }
 }
@@ -340,6 +346,53 @@ impl<const M: usize, const S: usize> ActuatorAssembly<M, S> {
             self.joints[joint_idx].present_vel
         } else {
             0.0
+        }
+    }
+
+    /// Get joint name for a joint axis as a string slice.
+    #[inline]
+    pub fn joint_name(&self, joint_idx: usize) -> &str {
+        if joint_idx < M {
+            let bytes = &self.joints[joint_idx].name;
+            let len = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+            core::str::from_utf8(&bytes[..len]).unwrap_or("")
+        } else {
+            ""
+        }
+    }
+
+    /// Set joint name for a joint axis (stored as up to 15 bytes null-padded UTF-8).
+    pub fn set_joint_name(&mut self, joint_idx: usize, name: &str) {
+        if joint_idx < M {
+            let bytes = name.as_bytes();
+            let copy_len = bytes.len().min(15);
+            self.joints[joint_idx].name[..copy_len].copy_from_slice(&bytes[..copy_len]);
+            self.joints[joint_idx].name[copy_len..].fill(0);
+        }
+    }
+
+    /// Get joint bus address (0-127).
+    #[inline]
+    pub fn joint_addr(&self, joint_idx: usize) -> u8 {
+        if joint_idx < M {
+            self.joints[joint_idx].addr
+        } else {
+            0
+        }
+    }
+
+    /// Set joint bus address (clamped to 0-127).
+    pub fn set_joint_addr(&mut self, joint_idx: usize, addr: u8) {
+        if joint_idx < M {
+            self.joints[joint_idx].addr = addr.min(127);
+        }
+    }
+
+    /// Synchronize joint naming, addresses, and target positions from a [`ControlTable`](crate::control_table::ControlTable).
+    pub fn sync_from_control_table(&mut self, table: &crate::control_table::ControlTable) {
+        for i in 0..M.min(4) {
+            self.set_joint_addr(i, table.joint_addr(i));
+            self.set_joint_name(i, table.joint_name(i));
         }
     }
 

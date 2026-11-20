@@ -1,8 +1,8 @@
 //! Universal Dynamixel-grade Smart Servo Control Table.
 //!
-//! Standardized, hardware-agnostic 176-byte Control Table partitioned into:
-//! - EEPROM Area (`0x00..0x60`, 96 bytes): non-volatile configuration committed to Flash.
-//! - RAM Area (`0x60..0xB0`, 80 bytes): volatile operational targets, setpoints, and telemetry.
+//! Standardized, hardware-agnostic 256-byte Control Table partitioned into:
+//! - EEPROM Area (`0x00..0xA0`, 160 bytes): non-volatile configuration committed to Flash.
+//! - RAM Area (`0xA0..0x100`, 96 bytes): volatile operational targets, setpoints, and telemetry.
 //!
 //! # Memory Map
 //!
@@ -11,115 +11,139 @@
 //! | 0x00 | ModelNumber | u16 | RO | Device model identifier |
 //! | 0x02 | FirmwareVersion | u8 | RO | Firmware revision |
 //! | 0x03 | ProtocolVersion | u8 | RO | Control Table protocol version |
-//! | 0x07 | NodeId | u8 | RW | Device bus target address (e.g. I2C/CAN node ID) |
-//! | 0x08 | OperatingMode | u8 | RW | Motion control mode (0..7) |
-//! | 0x09 | SecondaryId | u8 | RW | Secondary / group ID |
-//! | 0x0A | TopologyPreset | u8 | RW | Multi-motor kinematics preset (0..3, 0xFF) |
-//! | 0x0F | CouplingMask | u8 | RW | Kinematics coupling bitmask |
-//! | 0x10 | HomingOffset | f32 | RW | Homing position zero offset (rad) |
-//! | 0x14 | CurrentLimit | f32 | RW | Maximum allowable motor current (A) |
-//! | 0x18 | AccelerationLimit | f32 | RW | Maximum acceleration limit (rad/s^2) |
-//! | 0x1C | VelocityLimit | f32 | RW | Maximum velocity limit (rad/s) |
-//! | 0x20 | MinPositionLimit | f32 | RW | Minimum software travel limit (rad) |
-//! | 0x24 | MaxPositionLimit | f32 | RW | Maximum software travel limit (rad) |
-//! | 0x28 | VoltageLimit | f32 | RW | Maximum motor phase/drive voltage (V) |
-//! | 0x2C | TemperatureLimit | f32 | RW | Thermal shutdown temperature threshold (deg C) |
-//! | 0x30 | MinBusVoltage | f32 | RW | Minimum bus voltage cutoff (V) |
-//! | 0x34 | MaxBusVoltage | f32 | RW | Maximum bus voltage cutoff (V) |
-//! | 0x38 | PosPGain | f32 | RW | Position PID proportional gain Kp |
-//! | 0x3C | PosIGain | f32 | RW | Position PID integral gain Ki |
-//! | 0x40 | PosDGain | f32 | RW | Position PID derivative gain Kd |
-//! | 0x44 | VelPGain | f32 | RW | Velocity PID proportional gain Kp |
-//! | 0x48 | VelIGain | f32 | RW | Velocity PID integral gain Ki |
-//! | 0x4C | VelDGain | f32 | RW | Velocity PID derivative gain Kd |
-//! | 0x50 | CurrentPGain | f32 | RW | Current loop proportional gain Kp |
-//! | 0x54 | CurrentIGain | f32 | RW | Current loop integral gain Ki |
-//! | 0x58 | CurrentDGain | f32 | RW | Current loop derivative gain Kd |
-//! | 0x60 | TorqueEnable | u8 | RW | Motor bridge drive enable (0=Coast, 1=Enable) |
-//! | 0x61 | Led | u8 | RW | Status LED output |
-//! | 0x62 | StatusReturnLevel | u8 | RW | Comms response verbosity |
-//! | 0x63 | RebootCommand | u8 | RW | Software reboot trigger (0xF0 = Katapult bootloader) |
-//! | 0x64 | SaveConfigCommand | u8 | RW | Flash persistence trigger (0x55 = Save, 0xAA = Factory) |
-//! | 0x68 | ProfileVelocity | f32 | RW | Trapezoidal trajectory maximum velocity (rad/s) |
-//! | 0x6C | ProfileAcceleration | f32 | RW | Trapezoidal trajectory acceleration (rad/s^2) |
-//! | 0x70 | GoalPosition | f32 | RW | Target position setpoint (rad) |
-//! | 0x74 | GoalVelocity | f32 | RW | Target velocity setpoint (rad/s) |
-//! | 0x78 | GoalCurrent | f32 | RW | Target current / torque setpoint (A) |
-//! | 0x7C | GoalVoltage | f32 | RW | Target drive voltage setpoint (V) |
-//! | 0x80 | HardwareErrorStatus | u16 | RO | Active hardware fault bitfield |
-//! | 0x82 | PresentTemperature | f32 | RO | Measured internal MCU / stage temperature (deg C) |
-//! | 0x84 | PresentPosition | f32 | RO | Measured shaft / joint position (rad) |
-//! | 0x88 | PresentVelocity | f32 | RO | Measured shaft velocity (rad/s) |
-//! | 0x8C | PresentCurrent | f32 | RO | Measured motor current (A) |
-//! | 0x90 | PresentVoltage | f32 | RO | Commanded / applied phase voltage (V) |
-//! | 0x94 | PresentBusVoltage | f32 | RO | Measured DC supply / bus voltage (V) |
-//! | 0x98 | FilteredCurrent | f32 | RO | Low-pass filtered current telemetry (A) |
-//! | 0x9C | TrajectoryPosition | f32 | RO | Instantaneous trajectory generator position setpoint (rad) |
-//! | 0xA0 | Moving | u8 | RO | Motion profile active flag (1=in motion, 0=stopped) |
-//! | 0xA2 | MultiTurnRevolutions | i32 | RO | Cumulative completed shaft revolutions |
-//! | 0xA6 | MultiTurnAngle | f32 | RO | Cumulative unwrapped multi-turn angle (rad) |
+//! | 0x04 | HardwareUid | [u8; 12] | RO | Factory silicon 96-bit unique identifier |
+//! | 0x10 | BoardNodeId | u8 | RW | Device bus target address (default 0x40) |
+//! | 0x11 | BoardName | str (15B) | RW | User-configurable board node name (null-padded) |
+//! | 0x20 | Joint0Addr | u8 | RW | Joint 0 servo address (0..127) |
+//! | 0x21 | Joint0Name | str (15B) | RW | Joint 0 name (null-padded UTF-8) |
+//! | 0x30 | Joint1Addr | u8 | RW | Joint 1 servo address (0..127) |
+//! | 0x31 | Joint1Name | str (15B) | RW | Joint 1 name (null-padded UTF-8) |
+//! | 0x40 | Joint2Addr | u8 | RW | Joint 2 servo address (0..127) |
+//! | 0x41 | Joint2Name | str (15B) | RW | Joint 2 name (null-padded UTF-8) |
+//! | 0x50 | Joint3Addr | u8 | RW | Joint 3 servo address (0..127) |
+//! | 0x51 | Joint3Name | str (15B) | RW | Joint 3 name (null-padded UTF-8) |
+//! | 0x60 | OperatingMode | u8 | RW | Motion control mode (0..7) |
+//! | 0x61 | SecondaryId | u8 | RW | Secondary / group ID |
+//! | 0x62 | TopologyPreset | u8 | RW | Multi-motor kinematics preset (0..3, 0xFF) |
+//! | 0x63 | CouplingMask | u8 | RW | Kinematics coupling bitmask |
+//! | 0x64 | HomingOffset | f32 | RW | Homing position zero offset (rad) |
+//! | 0x68 | CurrentLimit | f32 | RW | Maximum allowable motor current (A) |
+//! | 0x6C | AccelerationLimit | f32 | RW | Maximum acceleration limit (rad/s^2) |
+//! | 0x70 | VelocityLimit | f32 | RW | Maximum velocity limit (rad/s) |
+//! | 0x74 | MinPositionLimit | f32 | RW | Minimum software travel limit (rad) |
+//! | 0x78 | MaxPositionLimit | f32 | RW | Maximum software travel limit (rad) |
+//! | 0x7C | VoltageLimit | f32 | RW | Maximum motor phase/drive voltage (V) |
+//! | 0x80 | TemperatureLimit | f32 | RW | Thermal shutdown temperature threshold (deg C) |
+//! | 0x84 | MinBusVoltage | f32 | RW | Minimum bus voltage cutoff (V) |
+//! | 0x88 | MaxBusVoltage | f32 | RW | Maximum bus voltage cutoff (V) |
+//! | 0x8C | PosPGain | f32 | RW | Position PID proportional gain Kp |
+//! | 0x90 | PosIGain | f32 | RW | Position PID integral gain Ki |
+//! | 0x94 | PosDGain | f32 | RW | Position PID derivative gain Kd |
+//! | 0x98 | VelPGain | f32 | RW | Velocity PID proportional gain Kp |
+//! | 0x9C | VelIGain | f32 | RW | Velocity PID integral gain Ki |
+//! | 0xA0 | TorqueEnable | u8 | RW | Motor bridge drive enable (0=Coast, 1=Enable) |
+//! | 0xA1 | Led | u8 | RW | Status LED output |
+//! | 0xA2 | StatusReturnLevel | u8 | RW | Comms response verbosity |
+//! | 0xA3 | RebootCommand | u8 | RW | Software reboot trigger (0xF0 = Katapult bootloader) |
+//! | 0xA4 | SaveConfigCommand | u8 | RW | Flash persistence trigger (0x55 = Save, 0xAA = Factory) |
+//! | 0xA8 | ProfileVelocity | f32 | RW | Trapezoidal trajectory maximum velocity (rad/s) |
+//! | 0xAC | ProfileAcceleration | f32 | RW | Trapezoidal trajectory acceleration (rad/s^2) |
+//! | 0xB0 | GoalPosition | f32 | RW | Target position setpoint (rad) |
+//! | 0xB4 | GoalVelocity | f32 | RW | Target velocity setpoint (rad/s) |
+//! | 0xB8 | GoalCurrent | f32 | RW | Target current / torque setpoint (A) |
+//! | 0xBC | GoalVoltage | f32 | RW | Target drive voltage setpoint (V) |
+//! | 0xC0 | HardwareErrorStatus | u16 | RO | Active hardware fault bitfield |
+//! | 0xC2 | PresentTemperature | f32 | RO | Measured internal MCU / stage temperature (deg C) |
+//! | 0xC4 | PresentPosition | f32 | RO | Measured shaft / joint position (rad) |
+//! | 0xC8 | PresentVelocity | f32 | RO | Measured shaft velocity (rad/s) |
+//! | 0xCC | PresentCurrent | f32 | RO | Measured motor current (A) |
+//! | 0xD0 | PresentVoltage | f32 | RO | Commanded / applied phase voltage (V) |
+//! | 0xD4 | PresentBusVoltage | f32 | RO | Measured DC supply / bus voltage (V) |
+//! | 0xD8 | FilteredCurrent | f32 | RO | Low-pass filtered current telemetry (A) |
+//! | 0xDC | TrajectoryPosition | f32 | RO | Instantaneous trajectory generator position setpoint (rad) |
+//! | 0xE0 | Moving | u8 | RO | Motion profile active flag (1=in motion, 0=stopped) |
+//! | 0xE2 | MultiTurnRevolutions | i32 | RO | Cumulative completed shaft revolutions |
+//! | 0xE6 | MultiTurnAngle | f32 | RO | Cumulative unwrapped multi-turn angle (rad) |
 
 /// Total byte capacity of the standardized Control Table.
-pub const CONTROL_TABLE_SIZE: usize = 176;
+pub const CONTROL_TABLE_SIZE: usize = 256;
 
 /// Byte offset marking the boundary between EEPROM and RAM areas.
-pub const EEPROM_AREA_SIZE: usize = 96;
+pub const EEPROM_AREA_SIZE: usize = 160;
 
 /// Byte size of the volatile RAM register area.
-pub const RAM_AREA_SIZE: usize = 80;
+pub const RAM_AREA_SIZE: usize = 96;
 
 // Register byte offsets
 pub const REG_MODEL_NUMBER: usize = 0x00;
 pub const REG_FIRMWARE_VERSION: usize = 0x02;
 pub const REG_PROTOCOL_VERSION: usize = 0x03;
-pub const REG_NODE_ID: usize = 0x07;
-pub const REG_OPERATING_MODE: usize = 0x08;
-pub const REG_SECONDARY_ID: usize = 0x09;
-pub const REG_TOPOLOGY_PRESET: usize = 0x0A;
-pub const REG_COUPLING_MASK: usize = 0x0F;
-pub const REG_HOMING_OFFSET: usize = 0x10;
-pub const REG_CURRENT_LIMIT: usize = 0x14;
-pub const REG_ACCELERATION_LIMIT: usize = 0x18;
-pub const REG_VELOCITY_LIMIT: usize = 0x1C;
-pub const REG_MIN_POSITION_LIMIT: usize = 0x20;
-pub const REG_MAX_POSITION_LIMIT: usize = 0x24;
-pub const REG_VOLTAGE_LIMIT: usize = 0x28;
-pub const REG_TEMPERATURE_LIMIT: usize = 0x2C;
-pub const REG_MIN_BUS_VOLTAGE: usize = 0x30;
-pub const REG_MAX_BUS_VOLTAGE: usize = 0x34;
-pub const REG_POS_P_GAIN: usize = 0x38;
-pub const REG_POS_I_GAIN: usize = 0x3C;
-pub const REG_POS_D_GAIN: usize = 0x40;
-pub const REG_VEL_P_GAIN: usize = 0x44;
-pub const REG_VEL_I_GAIN: usize = 0x48;
-pub const REG_VEL_D_GAIN: usize = 0x4C;
-pub const REG_CURRENT_P_GAIN: usize = 0x50;
-pub const REG_CURRENT_I_GAIN: usize = 0x54;
-pub const REG_CURRENT_D_GAIN: usize = 0x58;
 
-pub const REG_TORQUE_ENABLE: usize = 0x60;
-pub const REG_LED: usize = 0x61;
-pub const REG_STATUS_RETURN_LEVEL: usize = 0x62;
-pub const REG_REBOOT_CMD: usize = 0x63;
-pub const REG_SAVE_CONFIG_CMD: usize = 0x64;
-pub const REG_PROFILE_VELOCITY: usize = 0x68;
-pub const REG_PROFILE_ACCELERATION: usize = 0x6C;
-pub const REG_GOAL_POSITION: usize = 0x70;
-pub const REG_GOAL_VELOCITY: usize = 0x74;
-pub const REG_GOAL_CURRENT: usize = 0x78;
-pub const REG_GOAL_VOLTAGE: usize = 0x7C;
-pub const REG_HARDWARE_ERROR_STATUS: usize = 0x80;
-pub const REG_PRESENT_TEMPERATURE: usize = 0x82;
-pub const REG_PRESENT_POSITION: usize = 0x84;
-pub const REG_PRESENT_VELOCITY: usize = 0x88;
-pub const REG_PRESENT_CURRENT: usize = 0x8C;
-pub const REG_PRESENT_VOLTAGE: usize = 0x90;
-pub const REG_PRESENT_BUS_VOLTAGE: usize = 0x94;
-pub const REG_FILTERED_CURRENT: usize = 0x98;
-pub const REG_TRAJECTORY_POSITION: usize = 0x9C;
-pub const REG_MOVING: usize = 0xA0;
-pub const REG_MULTI_TURN_REVOLUTIONS: usize = 0xA2;
-pub const REG_MULTI_TURN_ANGLE: usize = 0xA6;
+// Board Identity
+pub const REG_HARDWARE_UID: usize = 0x04;
+pub const REG_BOARD_NODE_ID: usize = 0x10;
+pub const REG_NODE_ID: usize = REG_BOARD_NODE_ID;
+pub const REG_BOARD_NAME: usize = 0x11;
+
+// Joint Identity Slots (4x)
+pub const REG_JOINT0_ADDR: usize = 0x20;
+pub const REG_JOINT0_NAME: usize = 0x21;
+pub const REG_JOINT1_ADDR: usize = 0x30;
+pub const REG_JOINT1_NAME: usize = 0x31;
+pub const REG_JOINT2_ADDR: usize = 0x40;
+pub const REG_JOINT2_NAME: usize = 0x41;
+pub const REG_JOINT3_ADDR: usize = 0x50;
+pub const REG_JOINT3_NAME: usize = 0x51;
+
+// Configuration & Limits in EEPROM (0x60..0xA0)
+pub const REG_OPERATING_MODE: usize = 0x60;
+pub const REG_SECONDARY_ID: usize = 0x61;
+pub const REG_TOPOLOGY_PRESET: usize = 0x62;
+pub const REG_COUPLING_MASK: usize = 0x63;
+pub const REG_HOMING_OFFSET: usize = 0x64;
+pub const REG_CURRENT_LIMIT: usize = 0x68;
+pub const REG_ACCELERATION_LIMIT: usize = 0x6C;
+pub const REG_VELOCITY_LIMIT: usize = 0x70;
+pub const REG_MIN_POSITION_LIMIT: usize = 0x74;
+pub const REG_MAX_POSITION_LIMIT: usize = 0x78;
+pub const REG_VOLTAGE_LIMIT: usize = 0x7C;
+pub const REG_TEMPERATURE_LIMIT: usize = 0x80;
+pub const REG_MIN_BUS_VOLTAGE: usize = 0x84;
+pub const REG_MAX_BUS_VOLTAGE: usize = 0x88;
+pub const REG_POS_P_GAIN: usize = 0x8C;
+pub const REG_POS_I_GAIN: usize = 0x90;
+pub const REG_POS_D_GAIN: usize = 0x94;
+pub const REG_VEL_P_GAIN: usize = 0x98;
+pub const REG_VEL_I_GAIN: usize = 0x9C;
+pub const REG_VEL_D_GAIN: usize = 0x9C;
+pub const REG_CURRENT_P_GAIN: usize = 0x9C;
+pub const REG_CURRENT_I_GAIN: usize = 0x9C;
+pub const REG_CURRENT_D_GAIN: usize = 0x9C;
+
+// Volatile RAM area (0xA0..0x100)
+pub const REG_TORQUE_ENABLE: usize = 0xA0;
+pub const REG_LED: usize = 0xA1;
+pub const REG_STATUS_RETURN_LEVEL: usize = 0xA2;
+pub const REG_REBOOT_CMD: usize = 0xA3;
+pub const REG_SAVE_CONFIG_CMD: usize = 0xA4;
+pub const REG_PROFILE_VELOCITY: usize = 0xA8;
+pub const REG_PROFILE_ACCELERATION: usize = 0xAC;
+pub const REG_GOAL_POSITION: usize = 0xB0;
+pub const REG_GOAL_VELOCITY: usize = 0xB4;
+pub const REG_GOAL_CURRENT: usize = 0xB8;
+pub const REG_GOAL_VOLTAGE: usize = 0xBC;
+pub const REG_HARDWARE_ERROR_STATUS: usize = 0xC0;
+pub const REG_PRESENT_TEMPERATURE: usize = 0xC2;
+pub const REG_PRESENT_POSITION: usize = 0xC4;
+pub const REG_PRESENT_VELOCITY: usize = 0xC8;
+pub const REG_PRESENT_CURRENT: usize = 0xCC;
+pub const REG_PRESENT_VOLTAGE: usize = 0xD0;
+pub const REG_PRESENT_BUS_VOLTAGE: usize = 0xD4;
+pub const REG_FILTERED_CURRENT: usize = 0xD8;
+pub const REG_TRAJECTORY_POSITION: usize = 0xDC;
+pub const REG_MOVING: usize = 0xE0;
+pub const REG_MULTI_TURN_REVOLUTIONS: usize = 0xE2;
+pub const REG_MULTI_TURN_ANGLE: usize = 0xE6;
 
 /// Trigger value written to `RebootCommand` (0x63) to request BareBoot Katapult bootloader.
 pub const CMD_REBOOT_BOOTLOADER: u8 = 0xF0;
@@ -258,7 +282,11 @@ impl ControlTable {
         self.write_u16(REG_MODEL_NUMBER, 0x0503);
         self.write_u8(REG_FIRMWARE_VERSION, 0x01);
         self.write_u8(REG_PROTOCOL_VERSION, 0x02);
-        self.write_u8(REG_NODE_ID, 0x40); // Default I2C address 0x40
+        self.write_u8(REG_BOARD_NODE_ID, 0x40); // Default address 0x40
+        self.write_u8(REG_JOINT0_ADDR, 0);
+        self.write_u8(REG_JOINT1_ADDR, 1);
+        self.write_u8(REG_JOINT2_ADDR, 2);
+        self.write_u8(REG_JOINT3_ADDR, 3);
         self.write_u8(REG_OPERATING_MODE, OperatingMode::Position as u8);
         self.write_u8(REG_SECONDARY_ID, 0xFD);
         self.write_u8(REG_TOPOLOGY_PRESET, TopologyPreset::Independent4x1Dof as u8);
@@ -295,7 +323,7 @@ impl ControlTable {
         self.write_f32(REG_PROFILE_ACCELERATION, 25.0);
     }
 
-    /// Read an immutable byte slice of the entire 176-byte table.
+    /// Read an immutable byte slice of the entire 256-byte table.
     pub fn as_bytes(&self) -> &[u8; CONTROL_TABLE_SIZE] {
         &self.bytes
     }
@@ -305,25 +333,25 @@ impl ControlTable {
         &mut self.bytes
     }
 
-    /// Read an immutable view of the 96-byte non-volatile EEPROM section.
+    /// Read an immutable view of the 160-byte non-volatile EEPROM section.
     pub fn eeprom_bytes(&self) -> &[u8; EEPROM_AREA_SIZE] {
         let slice: &[u8] = &self.bytes[0..EEPROM_AREA_SIZE];
         slice.try_into().unwrap()
     }
 
-    /// Read a mutable view of the 96-byte non-volatile EEPROM section.
+    /// Read a mutable view of the 160-byte non-volatile EEPROM section.
     pub fn eeprom_bytes_mut(&mut self) -> &mut [u8; EEPROM_AREA_SIZE] {
         let slice: &mut [u8] = &mut self.bytes[0..EEPROM_AREA_SIZE];
         slice.try_into().unwrap()
     }
 
-    /// Read an immutable view of the 80-byte volatile RAM section.
+    /// Read an immutable view of the 96-byte volatile RAM section.
     pub fn ram_bytes(&self) -> &[u8; RAM_AREA_SIZE] {
         let slice: &[u8] = &self.bytes[EEPROM_AREA_SIZE..CONTROL_TABLE_SIZE];
         slice.try_into().unwrap()
     }
 
-    /// Read a mutable view of the 80-byte volatile RAM section.
+    /// Read a mutable view of the 96-byte volatile RAM section.
     pub fn ram_bytes_mut(&mut self) -> &mut [u8; RAM_AREA_SIZE] {
         let slice: &mut [u8] = &mut self.bytes[EEPROM_AREA_SIZE..CONTROL_TABLE_SIZE];
         slice.try_into().unwrap()
@@ -400,6 +428,95 @@ impl ControlTable {
     }
 
     // Typed field getters and setters
+    /// Read hardware silicon UID (12 bytes, RO).
+    pub fn hardware_uid(&self) -> &[u8; 12] {
+        let slice = &self.bytes[REG_HARDWARE_UID..REG_HARDWARE_UID + 12];
+        slice.try_into().unwrap()
+    }
+
+    /// Set hardware silicon UID (12 bytes).
+    pub fn set_hardware_uid(&mut self, uid: &[u8; 12]) {
+        self.bytes[REG_HARDWARE_UID..REG_HARDWARE_UID + 12].copy_from_slice(uid);
+    }
+
+    /// Read user-configurable board name (up to 15 bytes null-padded UTF-8).
+    pub fn board_name(&self) -> &str {
+        let slice = &self.bytes[REG_BOARD_NAME..REG_BOARD_NAME + 15];
+        let len = slice.iter().position(|&b| b == 0).unwrap_or(slice.len());
+        core::str::from_utf8(&slice[..len]).unwrap_or("")
+    }
+
+    /// Set user-configurable board name (up to 15 bytes null-padded UTF-8).
+    pub fn set_board_name(&mut self, name: &str) {
+        let bytes = name.as_bytes();
+        let copy_len = bytes.len().min(15);
+        self.bytes[REG_BOARD_NAME..REG_BOARD_NAME + copy_len].copy_from_slice(&bytes[..copy_len]);
+        self.bytes[REG_BOARD_NAME + copy_len..REG_BOARD_NAME + 15].fill(0);
+    }
+
+    /// Read board node ID (device address, 0..127).
+    pub fn board_node_id(&self) -> u8 {
+        self.read_u8(REG_BOARD_NODE_ID)
+    }
+
+    /// Set board node ID (device address, 0..127).
+    pub fn set_board_node_id(&mut self, id: u8) {
+        self.write_u8(REG_BOARD_NODE_ID, id);
+    }
+
+    /// Read joint servo address (0..127) for joint `index` (0..3).
+    pub fn joint_addr(&self, index: usize) -> u8 {
+        match index {
+            0 => self.read_u8(REG_JOINT0_ADDR),
+            1 => self.read_u8(REG_JOINT1_ADDR),
+            2 => self.read_u8(REG_JOINT2_ADDR),
+            3 => self.read_u8(REG_JOINT3_ADDR),
+            _ => 0,
+        }
+    }
+
+    /// Set joint servo address (0..127) for joint `index` (0..3).
+    pub fn set_joint_addr(&mut self, index: usize, addr: u8) {
+        let clamped = addr.min(127);
+        let offset = match index {
+            0 => REG_JOINT0_ADDR,
+            1 => REG_JOINT1_ADDR,
+            2 => REG_JOINT2_ADDR,
+            3 => REG_JOINT3_ADDR,
+            _ => return,
+        };
+        self.write_u8(offset, clamped);
+    }
+
+    /// Read joint name (up to 15 bytes null-padded UTF-8) for joint `index` (0..3).
+    pub fn joint_name(&self, index: usize) -> &str {
+        let offset = match index {
+            0 => REG_JOINT0_NAME,
+            1 => REG_JOINT1_NAME,
+            2 => REG_JOINT2_NAME,
+            3 => REG_JOINT3_NAME,
+            _ => return "",
+        };
+        let slice = &self.bytes[offset..offset + 15];
+        let len = slice.iter().position(|&b| b == 0).unwrap_or(slice.len());
+        core::str::from_utf8(&slice[..len]).unwrap_or("")
+    }
+
+    /// Set joint name (up to 15 bytes null-padded UTF-8) for joint `index` (0..3).
+    pub fn set_joint_name(&mut self, index: usize, name: &str) {
+        let offset = match index {
+            0 => REG_JOINT0_NAME,
+            1 => REG_JOINT1_NAME,
+            2 => REG_JOINT2_NAME,
+            3 => REG_JOINT3_NAME,
+            _ => return,
+        };
+        let bytes = name.as_bytes();
+        let copy_len = bytes.len().min(15);
+        self.bytes[offset..offset + copy_len].copy_from_slice(&bytes[..copy_len]);
+        self.bytes[offset + copy_len..offset + 15].fill(0);
+    }
+
     pub fn node_id(&self) -> u8 {
         self.read_u8(REG_NODE_ID)
     }
@@ -613,9 +730,101 @@ mod tests {
     #[test]
     fn test_control_table_size_and_partitions() {
         let table = ControlTable::new();
-        assert_eq!(table.as_bytes().len(), 176);
-        assert_eq!(table.eeprom_bytes().len(), 96);
-        assert_eq!(table.ram_bytes().len(), 80);
+        assert_eq!(table.as_bytes().len(), 256);
+        assert_eq!(table.eeprom_bytes().len(), 160);
+        assert_eq!(table.ram_bytes().len(), 96);
+    }
+
+    #[test]
+    fn test_board_identity_accessors() {
+        let mut table = ControlTable::new();
+        // Hardware UID
+        let uid = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C];
+        table.set_hardware_uid(&uid);
+        assert_eq!(table.hardware_uid(), &uid);
+
+        // Board node id
+        assert_eq!(table.board_node_id(), 0x40);
+        table.set_board_node_id(0x42);
+        assert_eq!(table.board_node_id(), 0x42);
+        assert_eq!(table.node_id(), 0x42);
+
+        // Board name
+        table.set_board_name("wrist_node");
+        assert_eq!(table.board_name(), "wrist_node");
+        // Test null padding and truncation beyond 15 bytes
+        table.set_board_name("a_very_long_board_name_exceeding_15");
+        assert_eq!(table.board_name().len(), 15);
+        assert_eq!(table.board_name(), &"a_very_long_board_name_exceeding_15"[..15]);
+    }
+
+    #[test]
+    fn test_joint_identity_accessors_and_bounds() {
+        let mut table = ControlTable::new();
+        // Defaults
+        assert_eq!(table.joint_addr(0), 0);
+        assert_eq!(table.joint_addr(1), 1);
+        assert_eq!(table.joint_addr(2), 2);
+        assert_eq!(table.joint_addr(3), 3);
+        assert_eq!(table.joint_name(0), "");
+
+        // Set joint addr and bounds clamping to 0-127
+        table.set_joint_addr(0, 5);
+        assert_eq!(table.joint_addr(0), 5);
+        table.set_joint_addr(1, 200); // Exceeds 127
+        assert_eq!(table.joint_addr(1), 127);
+
+        // Joint naming and null padding
+        table.set_joint_name(0, "wrist_pitch");
+        assert_eq!(table.joint_name(0), "wrist_pitch");
+        table.set_joint_name(1, "wrist_yaw");
+        assert_eq!(table.joint_name(1), "wrist_yaw");
+
+        // Out of bounds joint index
+        assert_eq!(table.joint_addr(4), 0);
+        assert_eq!(table.joint_name(4), "");
+        table.set_joint_addr(4, 10); // No-op
+        table.set_joint_name(4, "invalid"); // No-op
+    }
+
+    #[test]
+    fn test_control_table_factory_defaults_identity() {
+        let mut table = ControlTable::empty();
+        table.set_board_name("custom");
+        table.set_joint_addr(0, 50);
+        table.set_joint_name(0, "test_joint");
+        table.load_factory_defaults();
+        assert_eq!(table.board_node_id(), 0x40);
+        assert_eq!(table.board_name(), "");
+        assert_eq!(table.joint_addr(0), 0);
+        assert_eq!(table.joint_addr(1), 1);
+        assert_eq!(table.joint_addr(2), 2);
+        assert_eq!(table.joint_addr(3), 3);
+        assert_eq!(table.joint_name(0), "");
+    }
+
+    #[test]
+    fn test_flash_persistence_eeprom_roundtrip() {
+        let mut table = ControlTable::new();
+        let uid = [0xAA, 0xBB, 0xCC, 0xDD, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+        table.set_hardware_uid(&uid);
+        table.set_board_name("wrist_node");
+        table.set_joint_addr(0, 5);
+        table.set_joint_name(0, "wrist_pitch");
+        table.set_joint_addr(1, 6);
+        table.set_joint_name(1, "wrist_yaw");
+
+        let saved_eeprom = *table.eeprom_bytes();
+
+        let mut restored = ControlTable::empty();
+        restored.eeprom_bytes_mut().copy_from_slice(&saved_eeprom);
+
+        assert_eq!(restored.hardware_uid(), &uid);
+        assert_eq!(restored.board_name(), "wrist_node");
+        assert_eq!(restored.joint_addr(0), 5);
+        assert_eq!(restored.joint_name(0), "wrist_pitch");
+        assert_eq!(restored.joint_addr(1), 6);
+        assert_eq!(restored.joint_name(1), "wrist_yaw");
     }
 
     #[test]

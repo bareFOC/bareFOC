@@ -1036,4 +1036,47 @@ mod tests {
         assert_eq!(restored_assembly.motors[0].sensor_channel, 3);
         assert_eq!(restored_assembly.motors[1].sensor_channel, 2);
     }
+
+    #[test]
+    fn test_actuator_assembly_joint_naming_and_control_table_sync() {
+        let mut assembly = ActuatorAssembly::<4, 4>::new();
+        assert_eq!(assembly.joint_name(0), "");
+        assert_eq!(assembly.joint_addr(0), 0);
+
+        assembly.set_joint_name(0, "wrist_pitch");
+        assembly.set_joint_addr(0, 5);
+        assert_eq!(assembly.joint_name(0), "wrist_pitch");
+        assert_eq!(assembly.joint_addr(0), 5);
+
+        // Address bounds clamping to 0-127
+        assembly.set_joint_addr(1, 200);
+        assert_eq!(assembly.joint_addr(1), 127);
+
+        // Name truncation beyond 15 bytes
+        assembly.set_joint_name(2, "a_very_long_joint_name_12345");
+        assert_eq!(assembly.joint_name(2).len(), 15);
+        assert_eq!(assembly.joint_name(2), &"a_very_long_joint_name_12345"[..15]);
+
+        // Sync from ControlTable
+        let mut table = crate::control_table::ControlTable::new();
+        table.set_joint_addr(0, 10);
+        table.set_joint_name(0, "arm_base");
+        table.set_joint_addr(1, 11);
+        table.set_joint_name(1, "arm_shoulder");
+        table.set_joint_addr(2, 12);
+        table.set_joint_name(2, "arm_elbow");
+        table.set_joint_addr(3, 13);
+        table.set_joint_name(3, "arm_wrist");
+
+        assembly.sync_from_control_table(&table);
+
+        assert_eq!(assembly.joint_addr(0), 10);
+        assert_eq!(assembly.joint_name(0), "arm_base");
+        assert_eq!(assembly.joint_addr(1), 11);
+        assert_eq!(assembly.joint_name(1), "arm_shoulder");
+        assert_eq!(assembly.joint_addr(2), 12);
+        assert_eq!(assembly.joint_name(2), "arm_elbow");
+        assert_eq!(assembly.joint_addr(3), 13);
+        assert_eq!(assembly.joint_name(3), "arm_wrist");
+    }
 }

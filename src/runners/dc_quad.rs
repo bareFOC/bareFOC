@@ -57,16 +57,6 @@ use embassy_stm32::Peri;
 use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex};
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_time::{Duration, Instant, Ticker, Timer};
-#[inline(never)]
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    barefoc_stm32::bootloader::barefoc_failsafe_recovery();
-}
-
-#[cortex_m_rt::exception]
-unsafe fn HardFault(_ef: &cortex_m_rt::ExceptionFrame) -> ! {
-    barefoc_stm32::bootloader::barefoc_failsafe_recovery();
-}
 use rtt_target::{rprintln, DownChannel};
 use tmag_rs::barefoc::Tmag5273Sensor;
 use tmag_rs::{AngleEnable, DeviceVariant, MagneticChannel, OperatingMode, Range, Tmag5273};

@@ -27,10 +27,10 @@ use embassy_stm32::flash::Flash;
 use embassy_stm32::mode::Blocking;
 
 /// Config record offset, as required by `Flash::blocking_*` — relative to the
-/// flash start (`0x08000000`), i.e. absolute `0x0801E000`.
-const CONFIG_OFFSET: u32 = 0x1E000;
-/// Config sector length (last 8 KB sector of bank 2). Erase granularity.
-const SECTOR_LEN: u32 = 8 * 1024;
+/// flash start, derived from generated BSP NVM sector origin.
+const CONFIG_OFFSET: u32 = crate::bsp::NVM_SECTOR_ORIGIN - crate::bsp::FLASH_ORIGIN;
+/// Config sector length. Erase granularity.
+const SECTOR_LEN: u32 = crate::bsp::NVM_SECTOR_SIZE;
 /// Serialized record size (must be a multiple of the 16-byte program unit).
 const RECORD_LEN: usize = 64;
 

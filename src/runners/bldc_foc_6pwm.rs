@@ -1,16 +1,4 @@
-//! # MicroSpora STM32G431CB BLDC FOC Reference Example
-//!
-//! Reference firmware for the MicroSpora motor driver board
-//! (<https://oshwlab.com/rambros/nano-8316-motor-driver>):
-//! - MCU: `STM32G431CBU6` (ARM Cortex-M4F @ 170 MHz, 128 KiB Flash, 32 KiB RAM)
-//! - Gate Driver: TI `DRV8316` (6-PWM on `TIM1` + `SPI3` on `PB3/PB4/PB5`, `DRV_CS = PC4`)
-//!   - High-side (`TIM1_CH3/CH2/CH1`): `PHA_H = PA10`, `PHB_H = PA9`, `PHC_H = PA8`
-//!   - Low-side (`TIM1_CH3N/CH2N/CH1N`): `PHA_L = PB15`, `PHB_L = PB14`, `PHC_L = PB13`
-//! - Encoder: `MT6701` 14-bit SSI (`SPI1` on `PA5/PA6/PA7`, `ENC_CS = PA4`)
-//! - CAN Bus: `FDCAN1` (`CAN_RX = PB8`, `CAN_TX = PB9`, `CAN_ENABLE = PC13`)
-//! - Voltage Sense: `VSENS = PB11` (`ADC1`, `VSCALE = 11.0`)
-//! - Status LED: `LED_BUILTIN = PC6`
-
+//! Generic 6-PWM BLDC FOC runner (DRV8316 + SPI encoder + FDCAN/ADC), driven by `crate::bsp`.
 
 use barefoc::current_sense::generic::GenericCurrentSense;
 use barefoc::math::PhaseCurrent;
@@ -24,22 +12,13 @@ use embassy_executor::Spawner;
 use embassy_stm32::adc::{Adc, Config as AdcConfig};
 use embassy_stm32::can::{CanConfigurator, Frame};
 use embassy_stm32::gpio::{Level, Output, Speed};
-use embassy_stm32::rcc::{
-    AHBPrescaler, APBPrescaler, Pll, PllMul, PllPDiv, PllPreDiv, PllQDiv, PllRDiv, PllSource,
-    Sysclk,
-};
-use embassy_stm32::spi::{Config as SpiConfig, MODE_1, Spi};
+use embassy_stm32::spi::{Config as SpiConfig, Spi, MODE_1};
 use embassy_stm32::time::Hertz;
-use embassy_stm32::Config as Stm32Config;
 use embedded_can::StandardId;
-use embedded_hal::digital::OutputPin;
-use embedded_hal::spi::{Operation, SpiBus, SpiDevice};
 use mt6xxx_rs::{Config as Mt6701Config, Mt6701, SpiMode};
-use panic_halt as _;
 use rtt_target::{rprintln, rtt_init_print};
 
-/// System core clock frequency in Hz from generated BSP.
-const SYS_CLK_HZ: u32 = crate::bsp::SYSTEM_CLOCK_HZ;
+use crate::hal::{configure_g4_clocks, ExclusiveSpiDevice};
 
 /// Bus voltage resistor divider scale (`VSENS = PB11`).
 const VSCALE: f32 = 11.0;
@@ -47,89 +26,31 @@ const VSCALE: f32 = 11.0;
 /// ADC reference voltage in volts.
 const VREF: f32 = 3.3;
 
-/// Default motor pole pairs from generated BSP.
-const POLE_PAIRS: i32 = crate::bsp::POLE_PAIRS as i32;
-
-/// Exclusive SPI device wrapper asserting chip-select around each transaction.
-struct ExclusiveSpiDevice<BUS, CS> {
-    bus: BUS,
-    cs: CS,
-}
-
-impl<BUS: SpiBus, CS: OutputPin> ExclusiveSpiDevice<BUS, CS> {
-    fn new(bus: BUS, mut cs: CS) -> Self {
-        let _ = cs.set_high();
-        Self { bus, cs }
-    }
-}
-
-impl<BUS: SpiBus, CS: OutputPin> embedded_hal::spi::ErrorType for ExclusiveSpiDevice<BUS, CS> {
-    type Error = BUS::Error;
-}
-
-impl<BUS: SpiBus, CS: OutputPin> SpiDevice for ExclusiveSpiDevice<BUS, CS> {
-    fn transaction(&mut self, operations: &mut [Operation<'_, u8>]) -> Result<(), Self::Error> {
-        let _ = self.cs.set_low();
-        cortex_m::asm::delay(SYS_CLK_HZ / 1_000_000); // ~1 us CS setup
-
-        let res = (|| {
-            for op in operations {
-                match op {
-                    Operation::Read(buf) => self.bus.read(buf)?,
-                    Operation::Write(buf) => self.bus.write(buf)?,
-                    Operation::Transfer(r, w) => self.bus.transfer(r, w)?,
-                    Operation::TransferInPlace(buf) => self.bus.transfer_in_place(buf)?,
-                    Operation::DelayNs(ns) => {
-                        let cycles = (*ns as u64 * SYS_CLK_HZ as u64 / 1_000_000_000) as u32;
-                        cortex_m::asm::delay(cycles.max(1));
-                    }
-                }
-            }
-            Ok(())
-        })();
-
-        cortex_m::asm::delay(SYS_CLK_HZ / 1_000_000); // ~1 us CS hold
-        let _ = self.cs.set_high();
-        cortex_m::asm::delay(SYS_CLK_HZ / 1_000_000); // ~1 us bus release
-        res
-    }
-}
-
-fn configure_clocks() -> Stm32Config {
-    let mut cfg = Stm32Config::default();
-    // HSI (16 MHz) / 4 * 85 / 2 = 170 MHz SYSCLK
-    cfg.rcc.hsi = true;
-    cfg.rcc.pll = Some(Pll {
-        source: PllSource::Hsi,
-        prediv: PllPreDiv::Div4,
-        mul: PllMul::Mul85,
-        divp: Some(PllPDiv::Div2),
-        divq: Some(PllQDiv::Div2),
-        divr: Some(PllRDiv::Div2),
-    });
-    cfg.rcc.sys = Sysclk::Pll1R;
-    cfg.rcc.ahb_pre = AHBPrescaler::Div1;
-    cfg.rcc.apb1_pre = APBPrescaler::Div1;
-    cfg.rcc.apb2_pre = APBPrescaler::Div1;
-    cfg
-}
-
 pub async fn run(_spawner: Spawner) {
-    let p = embassy_stm32::init(configure_clocks());
+    let p = embassy_stm32::init(configure_g4_clocks());
     rtt_init_print!();
-    rprintln!("MicroSpora STM32G431CB BareFOC starting (170 MHz)...");
+    rprintln!(
+        "{} BareFOC 6-PWM starting ({} Hz)...",
+        crate::bsp::BOARD_NAME,
+        crate::bsp::SYSTEM_CLOCK_HZ
+    );
 
-    // Status LED (PC6) and CAN transceiver enable (PC13)
+    // Status LED and CAN transceiver enable
     let mut led = Output::new(p.PC6, Level::High, Speed::Low);
     let comm = crate::bsp::embassy_bsp::take_comm_peripherals!(p);
     let _can_en = Output::new(comm.can_enable, Level::High, Speed::Low);
 
     // FDCAN1 (typed from barefoc.toml)
-    let mut can_cfg = CanConfigurator::new(comm.bus, comm.rx_sda, comm.tx_scl, crate::bsp::embassy_bsp::CommIrqs);
+    let mut can_cfg = CanConfigurator::new(
+        comm.bus,
+        comm.rx_sda,
+        comm.tx_scl,
+        crate::bsp::embassy_bsp::CommIrqs,
+    );
     can_cfg.set_bitrate(crate::bsp::COMM_BITRATE);
     let mut can = can_cfg.into_normal_mode();
     if let Some(id) = StandardId::new(0x100) {
-        if let Ok(frame) = Frame::new_data(id, b"MSPR") {
+        if let Ok(frame) = Frame::new_data(id, b"BFOC") {
             let _ = can.write(&frame).await;
         }
     }
@@ -151,7 +72,7 @@ pub async fn run(_spawner: Spawner) {
         .dead_time_ns(500)
         .voltage_power_supply(v_supply)
         .voltage_limit(v_limit);
-    let clock = foc_cfg.init_clock(SYS_CLK_HZ);
+    let clock = foc_cfg.init_clock(crate::bsp::SYSTEM_CLOCK_HZ);
 
     // 2. TIM1 6-PWM stage (typed from barefoc.toml)
     let gd = crate::bsp::embassy_bsp::take_gate_driver_peripherals!(p);
@@ -200,7 +121,7 @@ pub async fn run(_spawner: Spawner) {
 
     // 5. Wire BLDCMotor
     let mut motor: BLDCMotor<'_, _, _, GenericCurrentSense<fn() -> PhaseCurrent, DwtClock>, DwtClock> =
-        BLDCMotor::new(POLE_PAIRS, 0.5, 100.0, 0.0, 0.0, &clock);
+        BLDCMotor::new(crate::bsp::POLE_PAIRS as i32, 0.5, 100.0, 0.0, 0.0, &clock);
 
     motor.link_driver(driver);
     motor.link_sensor(encoder);

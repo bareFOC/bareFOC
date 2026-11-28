@@ -1,4 +1,4 @@
-//! Miniata control-table descriptor set for the `barefoc-multibus` register map.
+//! Control-table descriptor set for the `barefoc-multibus` register map.
 #![allow(dead_code, unused_imports)]
 //!
 //! Mirrors `ref/Miniata/firmware/src/control_table.h` (offsets / widths / access

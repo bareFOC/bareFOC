@@ -90,50 +90,7 @@ use rtt_target::{rprintln, ChannelMode::NoBlockSkip};
 use barefoc_commander::LineProcessor;
 use barefoc_rtt::RttStream;
 
-/// Reset the MCU (used by panic / HardFault so a standalone demo self-heals
-/// instead of freezing forever).
-/// Independent watchdog: ~8 s timeout, kicked once per control-loop tick.
-/// Any lockup resets the board and the demo restarts automatically.
-const IWDG_BASE: usize = 0x4000_3000;
-fn iwdg_init() {
-    unsafe {
-        let kr = IWDG_BASE as *mut u32;
-        let pr = (IWDG_BASE + 0x04) as *mut u32;
-        let rlr = (IWDG_BASE + 0x08) as *mut u32;
-        core::ptr::write_volatile(kr, 0x5555); // unlock
-        core::ptr::write_volatile(pr, 0x04);   // /64
-        core::ptr::write_volatile(rlr, 0x0FFF); // ~8 s at 32 kHz LSI
-        core::ptr::write_volatile(kr, 0xAAAA); // initial reload
-        core::ptr::write_volatile(kr, 0xCCCC); // start
-    }
-}
-fn iwdg_feed() {
-    unsafe { core::ptr::write_volatile(IWDG_BASE as *mut u32, 0xAAAA); }
-}
-
-fn self_reset() -> ! {
-    unsafe {
-        cortex_m::asm::dsb();
-        core::ptr::write_volatile(0xE000_ED0C as *mut u32, 0x05FA0004);
-    }
-    loop {
-        cortex_m::asm::nop();
-    }
-}
-
-#[inline(never)]
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    barefoc_stm32::bootloader::barefoc_failsafe_recovery();
-}
-
-/// Any hard fault (including a debugger-induced DEBUGEVT) trips the failsafe
-/// recovery trampoline: PWM disabled, DRV_SLEEP low, mailbox token written,
-/// and system resets into BareBoot.
-#[no_mangle]
-pub unsafe extern "C" fn HardFault() -> ! {
-    barefoc_stm32::bootloader::barefoc_failsafe_recovery();
-}
+use crate::hal::{iwdg_feed, iwdg_init};
 
 use embassy_executor::Spawner;
 use embassy_stm32::flash::Flash;
@@ -162,11 +119,9 @@ use barefoc::kinematics::{Actuator1DOF, LinearGear};
 use drv83xx_rs::{Drv8311CsaGain, Drv8311HDriver3PWM};
 use mt6xxx_rs::{Mt6701, SpiMode};
 
-#[path = "miniata_config.rs"]
-mod config;
+use crate::nvm_config as config;
 #[cfg(not(feature = "uart"))]
-#[path = "miniata_table.rs"]
-mod table;
+use crate::control_table as table;
 
 use self::config::FlashConfigData;
 #[cfg(all(not(feature = "uart"), not(feature = "multi-motor")))]
@@ -177,7 +132,7 @@ use self::table::{MultiMotorState, build_multi_motor_table, read_f32, write_f32}
 /// Blocking-delay clock (default HSI).
 const SYS_CLK_HZ: u32 = 64_000_000;
 
-const POLE_PAIRS: f32 = 7.0;
+const POLE_PAIRS: f32 = crate::bsp::POLE_PAIRS as f32;
 const SUPPLY_VOLTAGE: f32 = 12.0;
 const VOLTAGE_LIMIT: f32 = 1.5;
 /// Physical supply rail. The only upper bound on the voltage command is what
@@ -661,7 +616,7 @@ pub async fn run(_spawner: Spawner) {
     // cortex-m-rt links the vector table for the Katapult layout) and is
     // 0x100-aligned as VTOR requires.
     unsafe {
-        core::ptr::write_volatile(0xE000_ED08 as *mut u32, 0x0800_2000);
+        core::ptr::write_volatile(0xE000_ED08 as *mut u32, crate::bsp::APP_ORIGIN);
     }
 
     iwdg_init();

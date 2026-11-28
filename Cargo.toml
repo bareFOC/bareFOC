@@ -1,0 +1,74 @@
+[package]
+name = "barefoc-firmware"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Unified TOML-driven BareFOC firmware crate for supported motor control boards."
+
+[workspace]
+members = ["."]
+
+[dependencies]
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = { version = "0.7", features = ["set-vtor", "set-sp"] }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy", rev = "24e2f68a94e3840d4c0fc197addd161fcb71306c", features = ["platform-cortex-m", "executor-thread", "executor-interrupt"] }
+embassy-stm32 = { git = "https://github.com/embassy-rs/embassy", rev = "24e2f68a94e3840d4c0fc197addd161fcb71306c", features = ["time-driver-any", "unstable-pac"] }
+embassy-time = { git = "https://github.com/embassy-rs/embassy", rev = "24e2f68a94e3840d4c0fc197addd161fcb71306c", features = ["generic-queue-64"] }
+embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy", rev = "24e2f68a94e3840d4c0fc197addd161fcb71306c" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy", rev = "24e2f68a94e3840d4c0fc197addd161fcb71306c" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy", rev = "24e2f68a94e3840d4c0fc197addd161fcb71306c" }
+
+embedded-hal = "1.0"
+embedded-hal-nb = "1.0"
+embedded-io = "0.6"
+embedded-can = "0.4"
+nb = "1.0"
+rtt-target = "0.6.2"
+panic-rtt-target = { version = "0.2.0", optional = true }
+panic-halt = { version = "0.2", optional = true }
+heapless = "0.8"
+
+barefoc = { path = "../barefoc-core", default-features = false, features = ["kinematics", "boot"] }
+barefoc-drivers = { path = "../barefoc-drivers/barefoc-drivers", default-features = false }
+barefoc-commander = { path = "../barefoc-comms/barefoc-commander", default-features = false, features = ["barefoc", "embedded-io"] }
+barefoc-multibus = { path = "../barefoc-comms/barefoc-multibus", default-features = false, features = ["simplefoc-profile"] }
+barefoc-rtt = { path = "../barefoc-comms/barefoc-rtt", default-features = false, features = ["rtt-target"] }
+barefoc-stm32 = { path = "../barefoc-hal/barefoc-stm32", default-features = false }
+tmag-rs = { path = "../barefoc-drivers/tmag-rs", default-features = false, features = ["barefoc"] }
+drv83xx-rs = { path = "../barefoc-drivers/drv83xx-rs", default-features = false, features = ["barefoc"] }
+mt6xxx-rs = { path = "../barefoc-drivers/mt6xxx-rs", default-features = false, features = ["barefoc"] }
+
+[build-dependencies]
+bareconfig = { path = "../bareConfig" }
+
+[features]
+default = []
+stm32h5 = [
+    "embassy-stm32/stm32h503kb",
+    "barefoc-stm32/stm32h5",
+    "barefoc-stm32/multibus",
+    "barefoc-stm32/bareboot",
+    "barefoc-stm32/katapult",
+    "dep:panic-rtt-target",
+]
+stm32g4 = [
+    "embassy-stm32/stm32g431cb",
+    "barefoc-stm32/stm32g431cb",
+    "dep:panic-halt",
+]
+bootloader = []
+multi-motor = []
+self-test = []
+uart = []
+defmt = []
+time = []
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = false

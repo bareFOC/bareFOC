@@ -1,0 +1,127 @@
+[board]
+name = "fishyservo-stm32h5"
+description = "FishyServo Quad H-Bridge Multi-Topology Servo (STM32H503KB)"
+mcu = "stm32h503kbu6"
+family = "stm32h5"
+system_clock_hz = 250000000
+
+[communication.host]
+protocol = "i3c"
+role = "target"
+bootloader = true
+peripheral = "I3C1"
+tx_scl_pin = "PB3"
+rx_sda_pin = "PB4"
+bitrate = 1000000
+address = 0x40
+
+[communication.sensor_bus]
+protocol = "i2c"
+role = "master"
+peripheral = "I2C1"
+tx_scl_pin = "PB6"
+rx_sda_pin = "PB7"
+mux = "tca9548a"
+mux_address = 0x70
+
+[bootloader]
+enabled = true
+type = "bareboot"
+boot_window_ms = 250
+preserve_nvm = true
+status_led = "!PA1"
+mailbox_address = 0x20007FE0
+mailbox_magic = 0x5984E3FA6CA1589B
+
+[safety]
+max_voltage_v = 6.0
+max_current_a = 2.0
+max_velocity_rad_s = 50.0
+temp_limit_mosfet_c = 85.0
+
+[defaults]
+node_id = 64
+pole_pairs = 1
+voltage_limit = 5.0
+current_limit = 1.0
+velocity_limit = 50.0
+pid_velocity_p = 0.5
+pid_velocity_i = 1.0
+pid_velocity_d = 0.0
+pid_velocity_output_ramp = 100.0
+pid_angle_p = 20.0
+pid_angle_i = 0.0
+pid_angle_d = 0.1
+lpf_velocity_tf = 0.02
+lpf_angle_tf = 0.0
+
+[kinematics]
+topology = "four_1dof"
+sensor_map = [0, 1, 2, 3]
+gear_ratio = 1.0
+
+[gate_driver]
+driver_type = "drv8411a"
+pwm_frequency_hz = 25000
+pwm_timer = "TIM1+TIM3"
+sleep_pin = "PA9"
+
+[[gate_driver.channels]]
+channel = 0
+bridge = "D"
+in1_pin = "PA9"
+in2_pin = "PB0"
+adc_pin = "PA5"
+timer = "TIM1_CH2+TIM3_CH3"
+
+[[gate_driver.channels]]
+channel = 1
+bridge = "B"
+in1_pin = "PA8"
+in2_pin = "PB15"
+adc_pin = "PA3"
+timer = "TIM1_CH1+TIM3_CH4"
+
+[[gate_driver.channels]]
+channel = 2
+bridge = "C"
+in1_pin = "PA6"
+in2_pin = "PA7"
+adc_pin = "PA4"
+timer = "TIM3_CH1+TIM3_CH2"
+
+[[gate_driver.channels]]
+channel = 3
+bridge = "A"
+in1_pin = "PA15"
+in2_pin = "PB5"
+adc_pin = "PA2"
+timer = "GPIO+TIM1_CH3"
+
+[sensor.ch0]
+type = "tmag5273"
+bus = "sensor_bus"
+address = 0x35
+mux_channel = 0
+
+[sensor.ch1]
+type = "tmag5273"
+bus = "sensor_bus"
+address = 0x35
+mux_channel = 1
+
+[sensor.ch2]
+type = "tmag5273"
+bus = "sensor_bus"
+address = 0x35
+mux_channel = 2
+
+[sensor.ch3]
+type = "tmag5273"
+bus = "sensor_bus"
+address = 0x35
+mux_channel = 3
+
+[assets]
+bootloader_bin = "bareboot-stm32h503-i3c-i2c.bin"
+firmware_bin = "fishyservo_stm32h5_i3c.bin"

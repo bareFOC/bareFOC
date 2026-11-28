@@ -1,0 +1,82 @@
+[board]
+name = "miniata-stm32h5"
+description = "Miniata Ultra-Compact Integrated FOC Actuator (STM32H503KB)"
+mcu = "stm32h503kbu6"
+family = "stm32h5"
+system_clock_hz = 250000000
+
+[memory]
+flash_origin = 0x08000000
+flash_size = 131072
+ram_origin = 0x20000000
+ram_size = 32768
+bootloader_origin = 0x08000000
+bootloader_size = 8192
+app_origin = 0x08002000
+app_size = 114688
+nvm_origin = 0x0801E000
+nvm_size = 8192
+
+[communication.host]
+protocol = "uart"
+role = "target"
+bootloader = true
+peripheral = "USART1"
+tx_scl_pin = "PB6"
+rx_sda_pin = "PB7"
+bitrate = 250000
+
+[bootloader]
+enabled = true
+type = "katapult"
+boot_window_ms = 250
+preserve_nvm = true
+mailbox_address = 0x20007FF8
+mailbox_magic = 0x5984E3FA6CA1589B
+
+[safety]
+max_voltage_v = 12.6
+max_current_a = 5.0
+max_velocity_rad_s = 200.0
+temp_limit_mosfet_c = 85.0
+
+[defaults]
+node_id = 1
+pole_pairs = 7
+voltage_limit = 6.0
+current_limit = 2.0
+velocity_limit = 100.0
+pid_velocity_p = 0.25
+pid_velocity_i = 3.5
+pid_velocity_d = 0.001
+pid_velocity_output_ramp = 100.0
+pid_angle_p = 25.0
+pid_angle_i = 0.0
+pid_angle_d = 0.05
+lpf_velocity_tf = 0.015
+lpf_angle_tf = 0.0
+
+[kinematics]
+gear_ratio = 1.0
+
+[gate_driver]
+driver_type = "drv8311"
+pwm_frequency_hz = 25000
+pwm_timer = "TIM1"
+inh_a = "PB5"
+inh_b = "PA9"
+inh_c = "PA8"
+inl_a = "PB1"
+inl_b = "PB0"
+inl_c = "PA7"
+sleep_pin = "PB15"
+fault_pin = "^!PB12"
+
+[sensor.motor]
+type = "mt6701_ssi"
+bus = "SPI2"
+cpr = 16384
+
+[assets]
+bootloader_bin = "katapult_uart.bin"
+firmware_bin = "firmware_miniata.bin"

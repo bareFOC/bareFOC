@@ -1,0 +1,7 @@
+[target.thumbv8m.main-none-eabihf]
+runner = "probe-rs run --chip STM32H503KB"
+rustflags = ["-C", "link-arg=-Tlink.x"]
+
+[target.thumbv7em-none-eabihf]
+runner = "probe-rs run --chip STM32G431CBUx"
+rustflags = ["-C", "link-arg=-Tlink.x"]

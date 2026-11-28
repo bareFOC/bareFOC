@@ -4,6 +4,10 @@ description = "MicroSpora BLDC FOC Motor Driver (STM32G431CBU6 + DRV8316 + MT670
 mcu = "stm32g431cbu6"
 family = "stm32g4"
 system_clock_hz = 170000000
+status_leds = ["PC6"]
+vbus_adc_peripheral = "ADC1"
+vbus_adc_pin = "PB11"
+vbus_divider_scale = 11.0
 
 [communication.host]
 protocol = "can"

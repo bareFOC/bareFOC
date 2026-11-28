@@ -20,9 +20,6 @@ use rtt_target::{rprintln, rtt_init_print};
 
 use crate::hal::{configure_g4_clocks, ExclusiveSpiDevice};
 
-/// Bus voltage resistor divider scale (`VSENS = PB11`).
-const VSCALE: f32 = 11.0;
-
 /// ADC reference voltage in volts.
 const VREF: f32 = 3.3;
 
@@ -35,12 +32,13 @@ pub async fn run(_spawner: Spawner) {
         crate::bsp::SYSTEM_CLOCK_HZ
     );
 
-    // Status LED and CAN transceiver enable
-    let mut led = Output::new(p.PC6, Level::High, Speed::Low);
+    // Status LED and CAN transceiver enable (typed from barefoc.toml)
+    let leds = crate::bsp::embassy_bsp::take_status_led_peripherals!(p);
+    let mut led = Output::new(leds.led0, Level::High, Speed::Low);
     let comm = crate::bsp::embassy_bsp::take_comm_peripherals!(p);
     let _can_en = Output::new(comm.can_enable, Level::High, Speed::Low);
 
-    // FDCAN1 (typed from barefoc.toml)
+    // FDCAN (typed from barefoc.toml)
     let mut can_cfg = CanConfigurator::new(
         comm.bus,
         comm.rx_sda,
@@ -55,12 +53,13 @@ pub async fn run(_spawner: Spawner) {
         }
     }
 
-    // Bus voltage sense on PB11 (VSCALE = 11.0)
-    let mut adc = Adc::new_blocking(p.ADC1, AdcConfig::default());
+    // Bus voltage sense (typed from barefoc.toml)
+    let vbus_adc = crate::bsp::embassy_bsp::take_vbus_adc_peripherals!(p);
+    let mut adc = Adc::new_blocking(vbus_adc.adc, AdcConfig::default());
     let sample_time = adc.sample_time_for_us(2);
-    let mut vsens_pin = p.PB11;
+    let mut vsens_pin = vbus_adc.pin;
     let raw_vbus = adc.blocking_read(&mut vsens_pin, sample_time);
-    let vbus = (raw_vbus as f32 / 4095.0) * VREF * VSCALE;
+    let vbus = (raw_vbus as f32 / 4095.0) * VREF * crate::bsp::VBUS_DIVIDER_SCALE;
     rprintln!("Measured Vbus: {} V (raw={})", vbus, raw_vbus);
 
     let v_supply = if vbus > 5.0 { vbus } else { 12.0 };
@@ -152,7 +151,7 @@ pub async fn run(_spawner: Spawner) {
         if tick % 2000 == 0 {
             led.toggle();
             let raw_v = adc.blocking_read(&mut vsens_pin, sample_time);
-            let v_now = (raw_v as f32 / 4095.0) * VREF * VSCALE;
+            let v_now = (raw_v as f32 / 4095.0) * VREF * crate::bsp::VBUS_DIVIDER_SCALE;
             rprintln!(
                 "angle={} rad, vel={} rad/s, vbus={} V",
                 motor.shaft_angle(),

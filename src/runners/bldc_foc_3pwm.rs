@@ -664,8 +664,9 @@ pub async fn run(_spawner: Spawner) {
     config.rcc.mux.spi2sel = embassy_stm32::pac::rcc::vals::Spisel::Per;
     let p = embassy_stm32::init(config);
 
-    let mut led_r = Output::new(p.PC14, Level::Low, Speed::Low);
-    let mut led_b = Output::new(p.PB8, Level::Low, Speed::Low);
+    let leds = crate::bsp::embassy_bsp::take_status_led_peripherals!(p);
+    let mut led_r = Output::new(leds.led0, Level::Low, Speed::Low);
+    let mut led_b = Output::new(leds.led1, Level::Low, Speed::Low);
 
     #[cfg(not(feature = "uart"))]
     let mut i2c_cfg = embassy_stm32::i2c::Config::default();
@@ -678,18 +679,21 @@ pub async fn run(_spawner: Spawner) {
         i2c_cfg.timeout = Duration::from_millis(2);
     }
     #[cfg(not(feature = "uart"))]
+    let alt_i2c = crate::bsp::embassy_bsp::take_alt_i2c_peripherals!(p);
+    #[cfg(not(feature = "uart"))]
     let i2c = embassy_stm32::i2c::I2c::new_blocking(
-        p.I2C1,
-        p.PB6,
-        p.PB7,
+        alt_i2c.bus,
+        alt_i2c.scl,
+        alt_i2c.sda,
         i2c_cfg,
     );
     #[cfg(feature = "uart")]
-    // ---- USART1 console (PB6=TX, PB7=RX) --------------------------------
+    // ---- UART console (from barefoc.toml) --------------------------------
     let mut uart = {
+        let comm = crate::bsp::embassy_bsp::take_comm_peripherals!(p);
         let mut uc = UartConfig::default();
         uc.baudrate = 115_200;
-        let mut u = Uart::new_blocking(p.USART1, p.PB6, p.PB7, uc).expect("USART1 init failed");
+        let mut u = Uart::new_blocking(comm.bus, comm.tx_scl, comm.rx_sda, uc).expect("UART init failed");
         // Enable RX (PB7 not auto-configured by tx-only constructor).
         u.blocking_write(b"\r\n=== Miniata joint servo (barefoc-kinematics) ===\r\n").ok();
         u.blocking_write(b"USART1 PB6=TX PB7=RX 115200 8N1. DISARMED.\r\n").ok();
@@ -813,41 +817,38 @@ pub async fn run(_spawner: Spawner) {
     #[cfg(not(feature = "uart"))]
     i2c_target.enable_bootloader(barefoc_stm32::bootloader::default_target());
 
-    // ---- Shared SSI bus + motor MT6701 encoder -----------------------------
+    // ---- Shared SSI bus + motor/output MT6701 encoders (from barefoc.toml) --
+    let sens = crate::bsp::embassy_bsp::take_sensor_peripherals!(p);
+    let shared_cs = crate::bsp::embassy_bsp::init_shared_spi_cs_inactive_high!(p);
     let mut spi_config = SpiConfig::default();
     spi_config.frequency = embassy_stm32::time::mhz(8);
     spi_config.mode = MODE_1;
-    let spi = Spi::new_blocking_rxonly(p.SPI2, p.PA12, p.PA15, spi_config);
+    let spi = Spi::new_blocking_rxonly(sens.bus, sens.clk, sens.data, spi_config);
     let spi_bus = RefCell::new(spi);
 
-    let mot_enc = Mt6701::new(SharedSpiDevice::new(
-        &spi_bus,
-        Output::new(p.PA11, Level::High, Speed::VeryHigh),
-    ))
-    .with_spi_mode(SpiMode::Mode1)
-    .with_max_retries(3);
+    let mot_enc = Mt6701::new(SharedSpiDevice::new(&spi_bus, shared_cs.motor))
+        .with_spi_mode(SpiMode::Mode1)
+        .with_max_retries(3);
 
-    // Output-shaft MT6701 (CS = PC15) closes the outer joint loop; its angle
+    // Output-shaft MT6701 closes the outer joint loop; its angle
     // is unwrapped by the barefoc `SensorBase` machinery inside step_outer.
-    let out_enc = Mt6701::new(SharedSpiDevice::new(
-        &spi_bus,
-        Output::new(p.PC15, Level::High, Speed::VeryHigh),
-    ))
-    .with_spi_mode(SpiMode::Mode1)
-    .with_max_retries(3);
+    let out_enc = Mt6701::new(SharedSpiDevice::new(&spi_bus, shared_cs.output))
+        .with_spi_mode(SpiMode::Mode1)
+        .with_max_retries(3);
 
-    // ---- TIM1 3-PWM @ 25 kHz + DRV8311H ------------------------------------
-    let ch1 = PwmPin::new(p.PA8, OutputType::PushPull);
-    let ch2 = PwmPin::new(p.PA9, OutputType::PushPull);
-    let ch3 = PwmPin::new(p.PB5, OutputType::PushPull);
+    // ---- 3-PWM + Gate Driver (from barefoc.toml) ---------------------------
+    let gd = crate::bsp::embassy_bsp::take_gate_driver_peripherals!(p);
+    let ch1 = PwmPin::new(gd.inh_c, OutputType::PushPull);
+    let ch2 = PwmPin::new(gd.inh_b, OutputType::PushPull);
+    let ch3 = PwmPin::new(gd.inh_a, OutputType::PushPull);
 
     let pwm = SimplePwm::new(
-        p.TIM1,
+        gd.timer,
         Some(ch1),
         Some(ch2),
         Some(ch3),
         None,
-        embassy_stm32::time::khz(25),
+        embassy_stm32::time::hz(crate::bsp::PWM_FREQUENCY_HZ),
         CountingMode::CenterAlignedBothInterrupts,
     );
     let mut channels = pwm.split();
@@ -855,10 +856,10 @@ pub async fn run(_spawner: Spawner) {
     channels.ch2.enable();
     channels.ch3.enable();
 
-    let en_a = Output::new(p.PB1, Level::Low, Speed::High);
-    let en_b = Output::new(p.PB0, Level::Low, Speed::High);
-    let en_c = Output::new(p.PA7, Level::Low, Speed::High);
-    let drv_sleep = Output::new(p.PB15, Level::High, Speed::Low);
+    let en_a = Output::new(gd.inl_a, Level::Low, Speed::High);
+    let en_b = Output::new(gd.inl_b, Level::Low, Speed::High);
+    let en_c = Output::new(gd.inl_c, Level::Low, Speed::High);
+    let drv_sleep = Output::new(gd.sleep, Level::High, Speed::Low);
 
     let bldc_pwm = BLDCDriver3PWM::new(
         channels.ch3, // phase A = PB5
@@ -1804,7 +1805,7 @@ pub async fn run(_spawner: Spawner) {
         #[cfg(not(feature = "uart"))]
         {
         // ---- I2C control-table service (before motor step) -----------------
-        let _ = i2c_target.service_once::<embassy_stm32::peripherals::I2C1>();
+        let _ = i2c_target.service_once::<crate::bsp::embassy_bsp::HostAltI2c>();
 
         // Handle command flags raised by register hooks.
         let (do_calib, do_zero, do_reboot_bl, do_reboot_sys, do_save, do_load, do_erase) = {

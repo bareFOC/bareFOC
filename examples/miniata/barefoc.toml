@@ -4,6 +4,7 @@ description = "Miniata Ultra-Compact Integrated FOC Actuator (STM32H503KB)"
 mcu = "stm32h503kbu6"
 family = "stm32h5"
 system_clock_hz = 250000000
+status_leds = ["PC14", "PB8"]
 
 [memory]
 flash_origin = 0x08000000
@@ -22,6 +23,7 @@ protocol = "uart"
 role = "target"
 bootloader = true
 peripheral = "USART1"
+alt_i2c_peripheral = "I2C1"
 tx_scl_pin = "PB6"
 rx_sda_pin = "PB7"
 bitrate = 250000
@@ -75,6 +77,15 @@ fault_pin = "^!PB12"
 [sensor.motor]
 type = "mt6701_ssi"
 bus = "SPI2"
+clk_pin = "PA12"
+data_pin = "PA15"
+cs_pin = "!PA11"
+cpr = 16384
+
+[sensor.output]
+type = "mt6701_ssi"
+bus = "SPI2"
+cs_pin = "!PC15"
 cpr = 16384
 
 [assets]

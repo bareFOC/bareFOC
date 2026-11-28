@@ -4,12 +4,16 @@ description = "FishyServo Quad H-Bridge Multi-Topology Servo (STM32H503KB)"
 mcu = "stm32h503kbu6"
 family = "stm32h5"
 system_clock_hz = 250000000
+status_leds = ["!PA1", "PA0"]
+vbus_adc_peripheral = "ADC1"
+vbus_adc_pin = "PB1"
+vbus_divider_scale = 4.703704
 
 [communication.host]
 protocol = "i3c"
 role = "target"
 bootloader = true
-peripheral = "I3C1"
+peripheral = "I3C2"
 tx_scl_pin = "PB3"
 rx_sda_pin = "PB4"
 bitrate = 1000000
@@ -21,8 +25,15 @@ role = "master"
 peripheral = "I2C1"
 tx_scl_pin = "PB6"
 rx_sda_pin = "PB7"
-mux = "tca9548a"
-mux_address = 0x70
+
+[communication.debug_uart]
+protocol = "uart"
+role = "master"
+bootloader = false
+peripheral = "USART1"
+tx_scl_pin = "PA12"
+rx_sda_pin = "PA11"
+bitrate = 115200
 
 [bootloader]
 enabled = true
@@ -98,29 +109,23 @@ in2_pin = "PB5"
 adc_pin = "PA2"
 timer = "GPIO+TIM1_CH3"
 
-[sensor.ch0]
+[sensor.s0]
 type = "tmag5273"
 bus = "sensor_bus"
-address = 0x35
-mux_channel = 0
+addresses = [0x35, 0x22, 0x78, 0x44]
+motor = 0
 
-[sensor.ch1]
+[sensor.s1]
 type = "tmag5273"
 bus = "sensor_bus"
-address = 0x35
-mux_channel = 1
+addresses = [0x35, 0x22, 0x78, 0x44]
+motor = 1
 
-[sensor.ch2]
+[sensor.s2]
 type = "tmag5273"
 bus = "sensor_bus"
-address = 0x35
-mux_channel = 2
-
-[sensor.ch3]
-type = "tmag5273"
-bus = "sensor_bus"
-address = 0x35
-mux_channel = 3
+addresses = [0x35, 0x22, 0x78, 0x44]
+motor = 2
 
 [assets]
 bootloader_bin = "bareboot-stm32h503-i3c-i2c.bin"

@@ -48,7 +48,6 @@ use embassy_stm32::i2c::{Config as I2cConfig, I2c, Master};
 use embassy_stm32::interrupt;
 use embassy_stm32::interrupt::{InterruptExt, Priority};
 use embassy_stm32::mode::Blocking;
-use embassy_stm32::peripherals::{ADC1, PA2, PA3, PA4, PA5, PB1, TIM1, TIM3};
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::low_level::CountingMode;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm, SimplePwmChannel};
@@ -197,7 +196,11 @@ pub unsafe fn write_soft_reset_mailbox(mb: &SoftResetMailbox) {
     core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
 }
 
-static ACTIVE_NODE_ID: AtomicU8 = AtomicU8::new(0x40);
+const DEFAULT_COMM_ADDRESS: u8 = match crate::bsp::COMM_ADDRESS {
+    Some(addr) => addr,
+    None => crate::bsp::DEFAULT_NODE_ID,
+};
+static ACTIVE_NODE_ID: AtomicU8 = AtomicU8::new(DEFAULT_COMM_ADDRESS);
 
 
 // ---------------------------------------------------------------------------
@@ -221,15 +224,17 @@ static CLOCK: EmbassyClock = EmbassyClock;
 // ---------------------------------------------------------------------------
 // ADC1 Channel Multiplexer & AdcPin Adapter
 // ---------------------------------------------------------------------------
-static GLOBAL_ADC: Mutex<ThreadModeRawMutex, RefCell<Option<Adc<'static, ADC1, Blocking>>>> =
-    Mutex::new(RefCell::new(None));
+static GLOBAL_ADC: Mutex<
+    ThreadModeRawMutex,
+    RefCell<Option<Adc<'static, crate::bsp::embassy_bsp::VbusAdcPeripheral, Blocking>>>,
+> = Mutex::new(RefCell::new(None));
 
 pub enum AdcInputPin {
-    ChA(Peri<'static, PA2>),
-    ChB(Peri<'static, PA3>),
-    ChC(Peri<'static, PA4>),
-    ChD(Peri<'static, PA5>),
-    Vsens(Peri<'static, PB1>),
+    ChA(Peri<'static, crate::bsp::embassy_bsp::Ch3AdcPin>),
+    ChB(Peri<'static, crate::bsp::embassy_bsp::Ch1AdcPin>),
+    ChC(Peri<'static, crate::bsp::embassy_bsp::Ch2AdcPin>),
+    ChD(Peri<'static, crate::bsp::embassy_bsp::Ch0AdcPin>),
+    Vsens(Peri<'static, crate::bsp::embassy_bsp::VbusAdcPin>),
 }
 
 pub struct Stm32AdcPin {
@@ -290,11 +295,14 @@ pub fn read_internal_temperature() -> f32 {
 pub struct BridgeADriver {
     params: DCDriverParams,
     dir_pin: Output<'static>,
-    pwm_ch: SimplePwmChannel<'static, TIM1>,
+    pwm_ch: SimplePwmChannel<'static, crate::bsp::embassy_bsp::PwmTimer0>,
 }
 
 impl BridgeADriver {
-    pub fn new(dir_pin: Output<'static>, pwm_ch: SimplePwmChannel<'static, TIM1>) -> Self {
+    pub fn new(
+        dir_pin: Output<'static>,
+        pwm_ch: SimplePwmChannel<'static, crate::bsp::embassy_bsp::PwmTimer0>,
+    ) -> Self {
         Self {
             params: DCDriverParams::new(),
             dir_pin,
@@ -362,9 +370,9 @@ impl DCDriver for BridgeADriver {
 // ---------------------------------------------------------------------------
 pub enum QuadDCDriver {
     A(BridgeADriver),
-    B(DCDriver2PWM<SimplePwmChannel<'static, TIM1>, SimplePwmChannel<'static, TIM3>>),
-    C(DCDriver2PWM<SimplePwmChannel<'static, TIM3>, SimplePwmChannel<'static, TIM3>>),
-    D(DCDriver2PWM<SimplePwmChannel<'static, TIM1>, SimplePwmChannel<'static, TIM3>>),
+    B(DCDriver2PWM<SimplePwmChannel<'static, crate::bsp::embassy_bsp::PwmTimer0>, SimplePwmChannel<'static, crate::bsp::embassy_bsp::PwmTimer1>>),
+    C(DCDriver2PWM<SimplePwmChannel<'static, crate::bsp::embassy_bsp::PwmTimer1>, SimplePwmChannel<'static, crate::bsp::embassy_bsp::PwmTimer1>>),
+    D(DCDriver2PWM<SimplePwmChannel<'static, crate::bsp::embassy_bsp::PwmTimer0>, SimplePwmChannel<'static, crate::bsp::embassy_bsp::PwmTimer1>>),
 }
 
 impl DCDriver for QuadDCDriver {
@@ -862,9 +870,12 @@ impl<I2C: embedded_hal::i2c::I2c> Sensor<EmbassyClock> for N20Sensor<I2C> {
     }
 }
 
-type MotorSensorType = N20Sensor<I2c<'static, Blocking, Master>>;
+type SharedSensorI2c = crate::hal::SharedI2cDevice<'static, I2c<'static, Blocking, Master>>;
+type MotorSensorType = N20Sensor<SharedSensorI2c>;
 type MotorCurrentSenseType = CurrentMirrorSense<Stm32AdcPin, EmbassyClock>;
 type DCMotorType = DCMotor<'static, MotorSensorType, QuadDCDriver, MotorCurrentSenseType, EmbassyClock>;
+static mut SENSOR_I2C_BUS: core::mem::MaybeUninit<RefCell<I2c<'static, Blocking, Master>>> =
+    core::mem::MaybeUninit::uninit();
 
 // ---------------------------------------------------------------------------
 // Assembly Motor Adapter implementing MotorControl
@@ -1241,7 +1252,7 @@ async fn motor_task(
 
         // 7. Measure hardware telemetry: VSENS (PB1, 10k/2.7k divider) & internal MCU temperature
         let raw_vsens = vsens_pin.read() as f32;
-        let bus_voltage = (raw_vsens * 3.3 / 4095.0) * ((10.0 + 2.7) / 2.7);
+        let bus_voltage = (raw_vsens * 3.3 / 4095.0) * crate::bsp::VBUS_DIVIDER_SCALE;
         let mcu_temp = read_internal_temperature();
         last_bus_voltage = bus_voltage;
         last_mcu_temp = mcu_temp;
@@ -1976,27 +1987,10 @@ fn init_i3c_target(target_node_id: u8, initial_motors: [SharedServoState; 4]) {
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 fn init_board_and_motors(
-    pa0: embassy_stm32::Peri<'static, embassy_stm32::peripherals::PA0>,
-    pa1: embassy_stm32::Peri<'static, embassy_stm32::peripherals::PA1>,
-    pa2: embassy_stm32::Peri<'static, PA2>,
-    pa3: embassy_stm32::Peri<'static, PA3>,
-    pa4: embassy_stm32::Peri<'static, PA4>,
-    pa5: embassy_stm32::Peri<'static, PA5>,
-    pa6: embassy_stm32::Peri<'static, embassy_stm32::peripherals::PA6>,
-    pa7: embassy_stm32::Peri<'static, embassy_stm32::peripherals::PA7>,
-    pa8: embassy_stm32::Peri<'static, embassy_stm32::peripherals::PA8>,
-    pa9: embassy_stm32::Peri<'static, embassy_stm32::peripherals::PA9>,
-    pa15: embassy_stm32::Peri<'static, embassy_stm32::peripherals::PA15>,
-    pb0: embassy_stm32::Peri<'static, embassy_stm32::peripherals::PB0>,
-    pb1: embassy_stm32::Peri<'static, PB1>,
-    pb5: embassy_stm32::Peri<'static, embassy_stm32::peripherals::PB5>,
-    pb6: embassy_stm32::Peri<'static, embassy_stm32::peripherals::PB6>,
-    pb7: embassy_stm32::Peri<'static, embassy_stm32::peripherals::PB7>,
-    pb15: embassy_stm32::Peri<'static, embassy_stm32::peripherals::PB15>,
-    tim1: embassy_stm32::Peri<'static, TIM1>,
-    tim3: embassy_stm32::Peri<'static, TIM3>,
-    adc1_peri: embassy_stm32::Peri<'static, ADC1>,
-    i2c1_peri: embassy_stm32::Peri<'static, embassy_stm32::peripherals::I2C1>,
+    leds: crate::bsp::embassy_bsp::StatusLedPeripherals,
+    gd: crate::bsp::embassy_bsp::QuadGateDriverPeripherals,
+    vbus_adc: crate::bsp::embassy_bsp::VbusAdcPeripherals,
+    sbus: crate::bsp::embassy_bsp::SensorBusPeripherals,
     initial_motors: &[SharedServoState; 4],
     boot_start: Instant,
 ) -> (
@@ -2007,32 +2001,32 @@ fn init_board_and_motors(
     bool,
     Stm32AdcPin,
 ) {
-    let mut led_b = Output::new(pa0, Level::Low, Speed::Low);
-    let led_r = Output::new(pa1, Level::High, Speed::Low);
+    let led_r = Output::new(leds.led0, Level::High, Speed::Low);
+    let mut led_b = Output::new(leds.led1, Level::Low, Speed::Low);
 
-    let tim1_ch1_pin = PwmPin::new(pa8, OutputType::PushPull);
-    let tim1_ch2_pin = PwmPin::new(pa9, OutputType::PushPull);
-    let tim1_ch3_pin = PwmPin::new(pb5, OutputType::PushPull);
+    let tim1_ch1_pin = PwmPin::new(gd.ch1_in1, OutputType::PushPull);
+    let tim1_ch2_pin = PwmPin::new(gd.ch0_in1, OutputType::PushPull);
+    let tim1_ch3_pin = PwmPin::new(gd.ch3_in2, OutputType::PushPull);
     let pwm1 = SimplePwm::new(
-        tim1,
+        gd.tim0,
         Some(tim1_ch1_pin),
         Some(tim1_ch2_pin),
         Some(tim1_ch3_pin),
         None,
-        Hertz(25_000),
+        Hertz(crate::bsp::PWM_FREQUENCY_HZ),
         CountingMode::EdgeAlignedUp,
     );
-    let tim3_ch1_pin = PwmPin::new(pa6, OutputType::PushPull);
-    let tim3_ch2_pin = PwmPin::new(pa7, OutputType::PushPull);
-    let tim3_ch3_pin = PwmPin::new(pb0, OutputType::PushPull);
-    let tim3_ch4_pin = PwmPin::new(pb15, OutputType::PushPull);
+    let tim3_ch1_pin = PwmPin::new(gd.ch2_in1, OutputType::PushPull);
+    let tim3_ch2_pin = PwmPin::new(gd.ch2_in2, OutputType::PushPull);
+    let tim3_ch3_pin = PwmPin::new(gd.ch0_in2, OutputType::PushPull);
+    let tim3_ch4_pin = PwmPin::new(gd.ch1_in2, OutputType::PushPull);
     let pwm3 = SimplePwm::new(
-        tim3,
+        gd.tim1,
         Some(tim3_ch1_pin),
         Some(tim3_ch2_pin),
         Some(tim3_ch3_pin),
         Some(tim3_ch4_pin),
-        Hertz(25_000),
+        Hertz(crate::bsp::PWM_FREQUENCY_HZ),
         CountingMode::EdgeAlignedUp,
     );
 
@@ -2055,29 +2049,29 @@ fn init_board_and_motors(
     let ch_d2 = tim3_chs.ch3;
     let ch_b2 = tim3_chs.ch4;
 
-    let pin_pa15 = Output::new(pa15, Level::Low, Speed::VeryHigh);
-    let mut driver_a = BridgeADriver::new(pin_pa15, ch_a2);
-    driver_a.params_mut().voltage_power_supply = 5.0;
-    driver_a.params_mut().voltage_limit = 5.0;
-    driver_a.params_mut().pwm_frequency = 25_000;
+    let pin_a_in1 = Output::new(gd.ch3_in1, Level::Low, Speed::VeryHigh);
+    let mut driver_a = BridgeADriver::new(pin_a_in1, ch_a2);
+    driver_a.params_mut().voltage_power_supply = crate::bsp::DEFAULT_VOLTAGE_LIMIT;
+    driver_a.params_mut().voltage_limit = crate::bsp::DEFAULT_VOLTAGE_LIMIT;
+    driver_a.params_mut().pwm_frequency = crate::bsp::PWM_FREQUENCY_HZ;
     driver_a.init().expect("Driver A init failed");
 
     let mut driver_b = DCDriver2PWM::without_enable(ch_b1, ch_b2);
-    driver_b.params_mut().voltage_power_supply = 5.0;
-    driver_b.params_mut().voltage_limit = 5.0;
-    driver_b.params_mut().pwm_frequency = 25_000;
+    driver_b.params_mut().voltage_power_supply = crate::bsp::DEFAULT_VOLTAGE_LIMIT;
+    driver_b.params_mut().voltage_limit = crate::bsp::DEFAULT_VOLTAGE_LIMIT;
+    driver_b.params_mut().pwm_frequency = crate::bsp::PWM_FREQUENCY_HZ;
     driver_b.init().expect("Driver B init failed");
 
     let mut driver_c = DCDriver2PWM::without_enable(ch_c1, ch_c2);
-    driver_c.params_mut().voltage_power_supply = 5.0;
-    driver_c.params_mut().voltage_limit = 5.0;
-    driver_c.params_mut().pwm_frequency = 25_000;
+    driver_c.params_mut().voltage_power_supply = crate::bsp::DEFAULT_VOLTAGE_LIMIT;
+    driver_c.params_mut().voltage_limit = crate::bsp::DEFAULT_VOLTAGE_LIMIT;
+    driver_c.params_mut().pwm_frequency = crate::bsp::PWM_FREQUENCY_HZ;
     driver_c.init().expect("Driver C init failed");
 
     let mut driver_d = DCDriver2PWM::without_enable(ch_d1, ch_d2);
-    driver_d.params_mut().voltage_power_supply = 5.0;
-    driver_d.params_mut().voltage_limit = 5.0;
-    driver_d.params_mut().pwm_frequency = 25_000;
+    driver_d.params_mut().voltage_power_supply = crate::bsp::DEFAULT_VOLTAGE_LIMIT;
+    driver_d.params_mut().voltage_limit = crate::bsp::DEFAULT_VOLTAGE_LIMIT;
+    driver_d.params_mut().pwm_frequency = crate::bsp::PWM_FREQUENCY_HZ;
     driver_d.init().expect("Driver D init failed");
 
     driver_a.set_pwm(0.0);
@@ -2086,16 +2080,16 @@ fn init_board_and_motors(
     driver_d.set_pwm(0.0);
     CLOCK.delay_ms(10);
 
-    let adc1 = Adc::new_blocking(adc1_peri, embassy_stm32::adc::Config::default());
+    let adc1 = Adc::new_blocking(vbus_adc.adc, embassy_stm32::adc::Config::default());
     GLOBAL_ADC.lock(|cell| {
         *cell.borrow_mut() = Some(adc1);
     });
 
-    let adc_pin_a = Stm32AdcPin::new(AdcInputPin::ChA(pa2), SampleTime::Cycles65);
-    let adc_pin_b = Stm32AdcPin::new(AdcInputPin::ChB(pa3), SampleTime::Cycles65);
-    let adc_pin_c = Stm32AdcPin::new(AdcInputPin::ChC(pa4), SampleTime::Cycles65);
-    let adc_pin_d = Stm32AdcPin::new(AdcInputPin::ChD(pa5), SampleTime::Cycles65);
-    let vsens_pin = Stm32AdcPin::new(AdcInputPin::Vsens(pb1), SampleTime::Cycles65);
+    let adc_pin_a = Stm32AdcPin::new(AdcInputPin::ChA(gd.ch3_adc), SampleTime::Cycles65);
+    let adc_pin_b = Stm32AdcPin::new(AdcInputPin::ChB(gd.ch1_adc), SampleTime::Cycles65);
+    let adc_pin_c = Stm32AdcPin::new(AdcInputPin::ChC(gd.ch2_adc), SampleTime::Cycles65);
+    let adc_pin_d = Stm32AdcPin::new(AdcInputPin::ChD(gd.ch0_adc), SampleTime::Cycles65);
+    let vsens_pin = Stm32AdcPin::new(AdcInputPin::Vsens(vbus_adc.pin), SampleTime::Cycles65);
 
     let mut cs_a = CurrentMirrorSense::new(adc_pin_a, 200.0, 1000.0, 3.3, 12);
     let mut cs_b = CurrentMirrorSense::new(adc_pin_b, 200.0, 1000.0, 3.3, 12);
@@ -2117,17 +2111,21 @@ fn init_board_and_motors(
     i2c1_cfg.scl_pullup = true;
     i2c1_cfg.frequency = Hertz::khz(50);
     i2c1_cfg.timeout = Duration::from_millis(10);
-    let mut i2c1 = I2c::new_blocking(i2c1_peri, pb6, pb7, i2c1_cfg);
+    let mut i2c1 = I2c::new_blocking(sbus.bus, sbus.scl, sbus.sda, i2c1_cfg);
     let mut i2c1_bus = Stm32I2cBusControl::new(embassy_stm32::pac::I2C1, 64_000_000, 100_000);
 
     let speeds_khz = [10u32, 20, 50, 100];
-    let candidate_addrs = [0x35u8, 0x22, 0x78, 0x44];
-    let mut detected_tmag = None;
+    let max_slots = crate::bsp::MAX_SENSOR_SLOTS.min(4);
+    let mut detected_tmags: [(u8, DeviceVariant); 4] = [(0, DeviceVariant::A1); 4];
+    let mut detected_count: usize = 0;
 
     for &khz in &speeds_khz {
         barefoc_stm32::feed_iwdg();
         let _ = i2c1_bus.set_bus_frequency_hz(khz * 1000);
-        for &addr in &candidate_addrs {
+        for &addr in crate::bsp::SENSOR_CANDIDATE_ADDRS {
+            if detected_tmags[..detected_count].iter().any(|&(a, _)| a == addr) {
+                continue;
+            }
             let mut mfg = [0u8; 2];
             if i2c1.blocking_write_read(addr, &[0x0E], &mut mfg).is_ok() && mfg == [0x49, 0x54] {
                 let mut dev_id = [0u8; 1];
@@ -2136,30 +2134,35 @@ fn init_board_and_motors(
                 } else {
                     DeviceVariant::A1
                 };
-                TMAG_DETECTED.store(true, Ordering::Relaxed);
-                detected_tmag = Some((addr, variant));
-                break;
+                if detected_count < max_slots {
+                    detected_tmags[detected_count] = (addr, variant);
+                    detected_count += 1;
+                    rprintln!("Detected TMAG5273 slot {} at 0x{:02X} ({:?})", detected_count - 1, addr, variant);
+                }
             }
         }
-        if detected_tmag.is_some() {
+        if detected_count > 0 {
             break;
         }
     }
+    TMAG_DETECTED.store(detected_count > 0, Ordering::Relaxed);
 
     embassy_time::block_for(Duration::from_millis(1));
-    let probed_max_hz = if let Some((addr, _)) = detected_tmag {
+    let probed_max_hz = if detected_count > 0 {
         i2c1_bus.probe_max_frequency_hz(
             &[1_000_000, 800_000, 400_000, 200_000, 100_000, 50_000],
             50_000,
             |_hz| {
-                let mut ok_cnt = 0u32;
-                for _ in 0..20 {
-                    let mut buf = [0u8; 2];
-                    if i2c1.blocking_write_read(addr, &[0x19], &mut buf).is_ok() {
-                        ok_cnt += 1;
+                detected_tmags[..detected_count].iter().all(|&(addr, _)| {
+                    let mut ok_cnt = 0u32;
+                    for _ in 0..20 {
+                        let mut buf = [0u8; 2];
+                        if i2c1.blocking_write_read(addr, &[0x19], &mut buf).is_ok() {
+                            ok_cnt += 1;
+                        }
                     }
-                }
-                ok_cnt == 20
+                    ok_cnt == 20
+                })
             },
         )
     } else {
@@ -2176,17 +2179,30 @@ fn init_board_and_motors(
         sq.borrow_mut().motors[0].sensor_bus_freq_hz = best_i2c1_hz;
     });
 
-    let init_range = if initial_motors[0].sensor_range == 0 {
-        Range::Low
-    } else {
-        Range::High
+    // SAFETY: `SENSOR_I2C_BUS` is initialized once here before any `SharedI2cDevice` is created.
+    let shared_i2c: &'static RefCell<I2c<'static, Blocking, Master>> = unsafe {
+        let ptr = (*core::ptr::addr_of_mut!(SENSOR_I2C_BUS)).as_mut_ptr();
+        ptr.write(RefCell::new(i2c1));
+        &*ptr
     };
-    let init_avg = tmag_rs::ConversionAverage::try_from(initial_motors[0].sensor_averaging)
-        .unwrap_or(tmag_rs::ConversionAverage::Avg1x);
-    let init_crc = initial_motors[0].sensor_crc_enable != 0;
 
-    let (sensor_a, has_sensor) = if let Some((addr, variant)) = detected_tmag {
-        match Tmag5273::builder(i2c1, addr)
+    let mut slot_sensors: [Option<MotorSensorType>; 4] = [None, None, None, None];
+    for slot_idx in 0..detected_count {
+        let (addr, variant) = detected_tmags[slot_idx];
+        let motor_idx = crate::bsp::SENSOR_SLOTS
+            .get(slot_idx)
+            .map(|s| (s.motor as usize).min(3))
+            .unwrap_or(slot_idx.min(3));
+        let init_range = if initial_motors[motor_idx].sensor_range == 0 {
+            Range::Low
+        } else {
+            Range::High
+        };
+        let init_avg = tmag_rs::ConversionAverage::try_from(initial_motors[motor_idx].sensor_averaging)
+            .unwrap_or(tmag_rs::ConversionAverage::Avg1x);
+        let init_crc = initial_motors[motor_idx].sensor_crc_enable != 0;
+
+        if let Ok(dev) = Tmag5273::builder(crate::hal::SharedI2cDevice::new(shared_i2c), addr)
             .variant(variant)
             .operating_mode(OperatingMode::ContinuousMeasure)
             .channels(MagneticChannel::XYZ)
@@ -2197,16 +2213,26 @@ fn init_board_and_motors(
             .crc_enabled(init_crc)
             .build()
         {
-            Ok(dev) => (N20Sensor::Tmag(Tmag5273Sensor::new(dev)), true),
-            Err(_) => (N20Sensor::Fallback(DummySensor::new()), false),
+            slot_sensors[slot_idx] = Some(N20Sensor::Tmag(Tmag5273Sensor::new(dev)));
         }
-    } else {
+    }
+
+    let sensor_map = SHARED_QUAD.lock(|sq| sq.borrow().sensor_map);
+    let mut take_sensor_for_motor = |motor_ch: usize| -> (MotorSensorType, bool) {
+        let slot = sensor_map.get(motor_ch).copied().unwrap_or(motor_ch as u8) as usize;
+        if slot < 4 {
+            if let Some(s) = slot_sensors[slot].take() {
+                return (s, true);
+            }
+        }
         (N20Sensor::Fallback(DummySensor::new()), false)
     };
 
-    let sensor_b = N20Sensor::Fallback(DummySensor::new());
-    let sensor_c = N20Sensor::Fallback(DummySensor::new());
-    let sensor_d = N20Sensor::Fallback(DummySensor::new());
+    let (sensor_a, has_sensor_a) = take_sensor_for_motor(0);
+    let (sensor_b, has_sensor_b) = take_sensor_for_motor(1);
+    let (sensor_c, has_sensor_c) = take_sensor_for_motor(2);
+    let (sensor_d, has_sensor_d) = take_sensor_for_motor(3);
+    let has_sensor = has_sensor_a || has_sensor_b || has_sensor_c || has_sensor_d;
 
     let mut motor_a = DCMotor::new(&CLOCK);
     motor_a.link_driver(QuadDCDriver::D(driver_d));
@@ -2216,7 +2242,7 @@ fn init_board_and_motors(
     motor_a.voltage_limit = 4.0;
     motor_a.velocity_limit = 50.0;
     motor_a.current_limit = 0.5;
-    motor_a.controller = if has_sensor { MotionControlType::angle } else { MotionControlType::velocity_openloop };
+    motor_a.controller = if has_sensor_a { MotionControlType::angle } else { MotionControlType::velocity_openloop };
     motor_a.torque_controller = TorqueControlType::voltage;
     motor_a.P_angle.set_p(initial_motors[0].p_angle);
     motor_a.PID_velocity.set_p(initial_motors[0].pid_vel_p);
@@ -2375,11 +2401,12 @@ pub async fn run(_spawner: Spawner) {
     }
 
     // -----------------------------------------------------------------------
-    // USART1 Console (PA11 RX, PA12 TX @ 115200 baud)
+    // Debug UART Console (from barefoc.toml)
     // -----------------------------------------------------------------------
+    let dbg_uart = crate::bsp::embassy_bsp::take_debug_uart_peripherals!(p);
     let mut usart_cfg = UartConfig::default();
-    usart_cfg.baudrate = 115_200;
-    let uart = Uart::new_blocking(p.USART1, p.PA12, p.PA11, usart_cfg).ok();
+    usart_cfg.baudrate = crate::bsp::embassy_bsp::DEBUG_UART_BITRATE;
+    let uart = Uart::new_blocking(dbg_uart.bus, dbg_uart.tx, dbg_uart.rx, usart_cfg).ok();
 
     // -----------------------------------------------------------------------
     // Soft-Reset Mailbox (0x2000_7FE0) Inspection & Address Selection
@@ -2406,11 +2433,15 @@ pub async fn run(_spawner: Spawner) {
         load_boot_config(p.FLASH, dynamic_node_id, mailbox_valid);
 
     // -----------------------------------------------------------------------
-    // I3C2 Multi-Motor MultiBus Target (Address from persisted NodeId)
+    // Host MultiBus Target (Address from persisted NodeId / barefoc.toml)
     // -----------------------------------------------------------------------
-    let _ = (&p.PB3, &p.PB4);
+    let _comm = crate::bsp::embassy_bsp::take_comm_peripherals!(p);
 
-    let target_node_id = if (0x08..=0x77).contains(&active_node_id) { active_node_id } else { 0x40 };
+    let target_node_id = if (0x08..=0x77).contains(&active_node_id) {
+        active_node_id
+    } else {
+        DEFAULT_COMM_ADDRESS
+    };
     barefoc_stm32::set_active_dynamic_node_id(target_node_id);
     barefoc_stm32::set_active_bus_type(1);
     init_i3c_target(target_node_id, initial_motors);
@@ -2430,28 +2461,16 @@ pub async fn run(_spawner: Spawner) {
     rprintln!("I3C2 target ready at 0x{:02X} ({} ms after init).", active_node_id, elapsed_ms);
 
 
+    let leds = crate::bsp::embassy_bsp::take_status_led_peripherals!(p);
+    let gd = crate::bsp::embassy_bsp::take_quad_gate_driver_peripherals!(p);
+    let vbus_adc = crate::bsp::embassy_bsp::take_vbus_adc_peripherals!(p);
+    let sbus = crate::bsp::embassy_bsp::take_sensor_bus_peripherals!(p);
+
     let (motors_ref, i2c1_bus, led_b, led_r, has_sensor, vsens_pin) = init_board_and_motors(
-        p.PA0,
-        p.PA1,
-        p.PA2,
-        p.PA3,
-        p.PA4,
-        p.PA5,
-        p.PA6,
-        p.PA7,
-        p.PA8,
-        p.PA9,
-        p.PA15,
-        p.PB0,
-        p.PB1,
-        p.PB5,
-        p.PB6,
-        p.PB7,
-        p.PB15,
-        p.TIM1,
-        p.TIM3,
-        p.ADC1,
-        p.I2C1,
+        leds,
+        gd,
+        vbus_adc,
+        sbus,
         &initial_motors,
         boot_start,
     );

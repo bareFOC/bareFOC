@@ -121,3 +121,28 @@ impl<BUS: SpiBus, CS: OutputPin> SpiDevice for ExclusiveSpiDevice<BUS, CS> {
         res
     }
 }
+
+/// Shared I2C device wrapper borrowing a `RefCell<BUS>` for multi-sensor I2C buses.
+pub struct SharedI2cDevice<'a, BUS> {
+    bus: &'a core::cell::RefCell<BUS>,
+}
+
+impl<'a, BUS> SharedI2cDevice<'a, BUS> {
+    pub fn new(bus: &'a core::cell::RefCell<BUS>) -> Self {
+        Self { bus }
+    }
+}
+
+impl<'a, BUS: embedded_hal::i2c::ErrorType> embedded_hal::i2c::ErrorType for SharedI2cDevice<'a, BUS> {
+    type Error = BUS::Error;
+}
+
+impl<'a, BUS: embedded_hal::i2c::I2c> embedded_hal::i2c::I2c for SharedI2cDevice<'a, BUS> {
+    fn transaction(
+        &mut self,
+        address: u8,
+        operations: &mut [embedded_hal::i2c::Operation<'_>],
+    ) -> Result<(), Self::Error> {
+        self.bus.borrow_mut().transaction(address, operations)
+    }
+}

@@ -2,39 +2,18 @@
 name = "miniata-stm32h5"
 description = "Miniata Ultra-Compact Integrated FOC Actuator (STM32H503KB)"
 mcu = "stm32h503kbu6"
-family = "stm32h5"
-system_clock_hz = 250000000
 status_leds = ["PC14", "PB8"]
 
-[memory]
-flash_origin = 0x08000000
-flash_size = 131072
-ram_origin = 0x20000000
-ram_size = 32768
-bootloader_origin = 0x08000000
-bootloader_size = 8192
-app_origin = 0x08002000
-app_size = 114688
-nvm_origin = 0x0801E000
-nvm_size = 8192
-
-[communication.host]
-protocol = "uart"
-role = "target"
+[communication.uart1]
 bootloader = true
-peripheral = "USART1"
 alt_i2c_peripheral = "I2C1"
-tx_scl_pin = "PB6"
-rx_sda_pin = "PB7"
+tx_pin = "PB6"
+rx_pin = "PB7"
 bitrate = 250000
 
 [bootloader]
-enabled = true
 type = "katapult"
-boot_window_ms = 250
-preserve_nvm = true
 mailbox_address = 0x20007FF8
-mailbox_magic = 0x5984E3FA6CA1589B
 
 [safety]
 max_voltage_v = 12.6
@@ -58,19 +37,11 @@ pid_angle_d = 0.05
 lpf_velocity_tf = 0.015
 lpf_angle_tf = 0.0
 
-[kinematics]
-gear_ratio = 1.0
-
 [gate_driver]
-driver_type = "drv8311"
-pwm_frequency_hz = 25000
-pwm_timer = "TIM1"
-inh_a = "PB5"
-inh_b = "PA9"
-inh_c = "PA8"
-inl_a = "PB1"
-inl_b = "PB0"
-inl_c = "PA7"
+type = "drv8311"
+topology = "half_bridge"
+pwm_pin = ["PB5", "PA9", "PA8"]
+en_pin = ["PB1", "PB0", "PA7"]
 sleep_pin = "PB15"
 fault_pin = "^!PB12"
 
@@ -80,13 +51,11 @@ bus = "SPI2"
 clk_pin = "PA12"
 data_pin = "PA15"
 cs_pin = "!PA11"
-cpr = 16384
 
 [sensor.output]
 type = "mt6701_ssi"
 bus = "SPI2"
 cs_pin = "!PC15"
-cpr = 16384
 
 [assets]
 bootloader_bin = "katapult_uart.bin"

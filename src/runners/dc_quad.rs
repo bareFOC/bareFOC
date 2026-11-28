@@ -51,7 +51,7 @@ use embassy_stm32::mode::Blocking;
 use embassy_stm32::time::Hertz;
 use embassy_stm32::timer::low_level::CountingMode;
 use embassy_stm32::timer::simple_pwm::{PwmPin, SimplePwm, SimplePwmChannel};
-use embassy_stm32::usart::{Config as UartConfig, Uart};
+use embassy_stm32::usart::Uart;
 use embassy_stm32::Peri;
 use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex};
 use embassy_sync::blocking_mutex::Mutex;
@@ -924,6 +924,7 @@ async fn motor_task(
     TMAG_DETECTED.store(has_sensor, Ordering::Relaxed);
     let mut ticker = Ticker::every(Duration::from_millis(1));
     let mut loop_count: u32 = 0;
+    let mut active_pwm_freq_hz: u32 = crate::bsp::PWM_FREQUENCY_HZ;
 
     let mut supervisors: [SafetySupervisor; 4] = SHARED_CONTROL_TABLE.lock(|ct| {
         let mut cfg = SafetyConfig::from_control_table(&ct.borrow());
@@ -1284,6 +1285,34 @@ async fn motor_task(
             table.set_sensor_range(sq_motors[0].sensor_range);
             table.set_sensor_averaging(sq_motors[0].sensor_averaging);
             table.set_sensor_crc_enable(sq_motors[0].sensor_crc_enable != 0);
+
+            let desired_pwm_hz = table.pwm_frequency_hz();
+            if desired_pwm_hz != active_pwm_freq_hz {
+                let any_armed = motors.iter().any(|m| m.enabled != 0);
+                if any_armed {
+                    table.write_u32(
+                        barefoc::control_table::REG_PWM_FREQUENCY_HZ,
+                        active_pwm_freq_hz,
+                    );
+                } else {
+                    active_pwm_freq_hz = desired_pwm_hz;
+                    let arr = (crate::bsp::SYSTEM_CLOCK_HZ / active_pwm_freq_hz)
+                        .saturating_sub(1)
+                        .clamp(1, 0xFFFF) as u16;
+                    embassy_stm32::pac::TIM1.arr().write(|w| w.set_arr(arr));
+                    embassy_stm32::pac::TIM3.arr().write(|w| w.set_arr(arr));
+                    for m in motors.iter_mut() {
+                        if let Some(drv) = m.driver_mut() {
+                            match drv {
+                                QuadDCDriver::A(d) => d.params_mut().pwm_frequency = active_pwm_freq_hz,
+                                QuadDCDriver::B(d) => d.params_mut().pwm_frequency = active_pwm_freq_hz,
+                                QuadDCDriver::C(d) => d.params_mut().pwm_frequency = active_pwm_freq_hz,
+                                QuadDCDriver::D(d) => d.params_mut().pwm_frequency = active_pwm_freq_hz,
+                            }
+                        }
+                    }
+                }
+            }
 
             table.evaluate_errors(max_current_a, bus_voltage, mcu_temp);
             table.enforce_limits();
@@ -2401,12 +2430,9 @@ pub async fn run(_spawner: Spawner) {
     }
 
     // -----------------------------------------------------------------------
-    // Debug UART Console (from barefoc.toml)
+    // Debug UART Console (FishyServo has no UART)
     // -----------------------------------------------------------------------
-    let dbg_uart = crate::bsp::embassy_bsp::take_debug_uart_peripherals!(p);
-    let mut usart_cfg = UartConfig::default();
-    usart_cfg.baudrate = crate::bsp::embassy_bsp::DEBUG_UART_BITRATE;
-    let uart = Uart::new_blocking(dbg_uart.bus, dbg_uart.tx, dbg_uart.rx, usart_cfg).ok();
+    let uart: Option<Uart<'static, Blocking>> = None;
 
     // -----------------------------------------------------------------------
     // Soft-Reset Mailbox (0x2000_7FE0) Inspection & Address Selection

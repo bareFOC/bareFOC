@@ -2,47 +2,27 @@
 name = "fishyservo-stm32h5"
 description = "FishyServo Quad H-Bridge Multi-Topology Servo (STM32H503KB)"
 mcu = "stm32h503kbu6"
-family = "stm32h5"
-system_clock_hz = 250000000
 status_leds = ["!PA1", "PA0"]
 vbus_adc_peripheral = "ADC1"
 vbus_adc_pin = "PB1"
 vbus_divider_scale = 4.703704
 
-[communication.host]
-protocol = "i3c"
-role = "target"
+[communication.i3c2]
 bootloader = true
-peripheral = "I3C2"
-tx_scl_pin = "PB3"
-rx_sda_pin = "PB4"
+scl_pin = "PB3"
+sda_pin = "PB4"
 bitrate = 1000000
 address = 0x40
 
-[communication.sensor_bus]
-protocol = "i2c"
+[communication.i2c1]
 role = "master"
-peripheral = "I2C1"
-tx_scl_pin = "PB6"
-rx_sda_pin = "PB7"
-
-[communication.debug_uart]
-protocol = "uart"
-role = "master"
-bootloader = false
-peripheral = "USART1"
-tx_scl_pin = "PA12"
-rx_sda_pin = "PA11"
-bitrate = 115200
+scl_pin = "PB6"
+sda_pin = "PB7"
 
 [bootloader]
-enabled = true
 type = "bareboot"
-boot_window_ms = 250
-preserve_nvm = true
 status_led = "!PA1"
 mailbox_address = 0x20007FE0
-mailbox_magic = 0x5984E3FA6CA1589B
 
 [safety]
 max_voltage_v = 6.0
@@ -69,62 +49,29 @@ lpf_angle_tf = 0.0
 [kinematics]
 topology = "four_1dof"
 sensor_map = [0, 1, 2, 3]
-gear_ratio = 1.0
 
 [gate_driver]
-driver_type = "drv8411a"
-pwm_frequency_hz = 25000
-pwm_timer = "TIM1+TIM3"
-sleep_pin = "PA9"
-
-[[gate_driver.channels]]
-channel = 0
-bridge = "D"
-in1_pin = "PA9"
-in2_pin = "PB0"
-adc_pin = "PA5"
-timer = "TIM1_CH2+TIM3_CH3"
-
-[[gate_driver.channels]]
-channel = 1
-bridge = "B"
-in1_pin = "PA8"
-in2_pin = "PB15"
-adc_pin = "PA3"
-timer = "TIM1_CH1+TIM3_CH4"
-
-[[gate_driver.channels]]
-channel = 2
-bridge = "C"
-in1_pin = "PA6"
-in2_pin = "PA7"
-adc_pin = "PA4"
-timer = "TIM3_CH1+TIM3_CH2"
-
-[[gate_driver.channels]]
-channel = 3
-bridge = "A"
-in1_pin = "PA15"
-in2_pin = "PB5"
-adc_pin = "PA2"
-timer = "GPIO+TIM1_CH3"
+type = "drv8411a"
+topology = "h_bridge"
+high_pwm_pin = ["PA9", "PA8", "PA6", "PA15"]
+low_pwm_pin = ["PB0", "PB15", "PA7", "PB5"]
+current_sense = "lowside"
+current_adc_pin = ["PA5", "PA3", "PA4", "PA2"]
+ripropi_ohms = 1000.0
 
 [sensor.s0]
 type = "tmag5273"
-bus = "sensor_bus"
-addresses = [0x35, 0x22, 0x78, 0x44]
+bus = "i2c1"
 motor = 0
 
 [sensor.s1]
 type = "tmag5273"
-bus = "sensor_bus"
-addresses = [0x35, 0x22, 0x78, 0x44]
+bus = "i2c1"
 motor = 1
 
 [sensor.s2]
 type = "tmag5273"
-bus = "sensor_bus"
-addresses = [0x35, 0x22, 0x78, 0x44]
+bus = "i2c1"
 motor = 2
 
 [assets]

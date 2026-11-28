@@ -88,7 +88,11 @@ fn main() {
     }
 
     // Emit gate driver capability cfg
-    match board.gate_driver.driver_type.to_ascii_lowercase().as_str() {
+    let drv_type = board
+        .primary_gate_driver()
+        .map(|(_, g)| g.driver_type.to_ascii_lowercase())
+        .unwrap_or_default();
+    match drv_type.as_str() {
         "drv8411a" => println!("cargo:rustc-cfg=drv_drv8411a"),
         "drv8316" => println!("cargo:rustc-cfg=drv_drv8316"),
         "drv8311" => println!("cargo:rustc-cfg=drv_drv8311"),

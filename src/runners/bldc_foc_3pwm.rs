@@ -856,9 +856,9 @@ pub async fn run(_spawner: Spawner) {
     channels.ch2.enable();
     channels.ch3.enable();
 
-    let en_a = Output::new(gd.inl_a, Level::Low, Speed::High);
-    let en_b = Output::new(gd.inl_b, Level::Low, Speed::High);
-    let en_c = Output::new(gd.inl_c, Level::Low, Speed::High);
+    let en_a = Output::new(gd.en_a, Level::Low, Speed::High);
+    let en_b = Output::new(gd.en_b, Level::Low, Speed::High);
+    let en_c = Output::new(gd.en_c, Level::Low, Speed::High);
     let drv_sleep = Output::new(gd.sleep, Level::High, Speed::Low);
 
     let bldc_pwm = BLDCDriver3PWM::new(
